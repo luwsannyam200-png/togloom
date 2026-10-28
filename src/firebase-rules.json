@@ -1,0 +1,125 @@
+{
+  "rules": {
+    "names": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24"
+      }
+    },
+    "scores": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        "$game": {
+          ".validate": "$game.matches(/^(flappy|race|puzzle|quiz|chess)$/) && newData.hasChildren(['best', 'at'])",
+          "best": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000000" },
+          "at": { ".validate": "newData.isNumber() && newData.val() <= now + 60000" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+    "quizsets": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        "sets": {
+          "$sid": {
+            ".validate": "$sid.matches(/^[a-z0-9]{1,16}$/) && newData.hasChildren(['title', 'sec', 'qs', 'at'])",
+            "title": { ".validate": "newData.isString() && newData.val().length <= 60" },
+            "sec": { ".validate": "newData.val() === 10 || newData.val() === 15 || newData.val() === 20 || newData.val() === 30" },
+            "at": { ".validate": "newData.isNumber()" },
+            "qs": {
+              "$i": {
+                ".validate": "$i.matches(/^([0-9]|[1-3][0-9])$/) && newData.hasChildren(['q', 'o', 'k'])",
+                "q": { ".validate": "newData.isString() && newData.val().length <= 300" },
+                "k": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
+                "o": {
+                  "$j": { ".validate": "$j.matches(/^[0-3]$/) && newData.isString() && newData.val().length <= 120" }
+                },
+                "$other": { ".validate": false }
+              }
+            },
+            "$other": { ".validate": false }
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+    "tours": {
+      ".read": "auth != null",
+      "$tid": {
+        ".write": "auth != null && $tid.matches(/^[a-z0-9]{1,12}$/) && (data.exists() ? data.child('by').val() === auth.uid : newData.child('by').val() === auth.uid)",
+        "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+        "by": { ".validate": "newData.isString() && newData.val().length <= 128" },
+        "status": { ".validate": "newData.val() === 'join' || newData.val() === 'play' || newData.val() === 'done'" },
+        "at": { ".validate": "newData.isNumber()" },
+        "started": { ".validate": "newData.isNumber()" },
+        "ended": { ".validate": "newData.isNumber()" },
+        "order": {
+          "$i": { ".validate": "$i.matches(/^[0-9]{1,2}$/) && newData.isString() && newData.val().length <= 128" }
+        },
+        "players": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('tours').child($tid).child('status').val() === 'join'",
+            ".validate": "newData.hasChildren(['at'])",
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "games": {
+          "$pid": {
+            ".write": "auth != null && root.child('tours').child($tid).child('status').val() === 'play' && (newData.child('w').val() === auth.uid || newData.child('b').val() === auth.uid)",
+            ".validate": "$pid.matches(/^p[0-9]{1,2}-[0-9]{1,2}$/) && newData.hasChildren(['w', 'b', 'res', 'at'])",
+            "w": { ".validate": "newData.isString() && newData.val().length <= 128" },
+            "b": { ".validate": "newData.isString() && newData.val().length <= 128" },
+            "res": { ".validate": "newData.val() === 'w' || newData.val() === 'b' || newData.val() === 'd'" },
+            "how": { ".validate": "newData.val() === 'online' || newData.val() === 'board'" },
+            "by": { ".validate": "newData.val() === auth.uid" },
+            "at": { ".validate": "newData.isNumber()" },
+            "n": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 2000" },
+            "$other": { ".validate": false }
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+    "arena": {
+      ".read": "auth != null",
+      "$code": {
+        ".write": "auth != null && $code.matches(/^[A-Z0-9]{4,6}$/) && (data.exists() ? data.child('by').val() === auth.uid : newData.child('by').val() === auth.uid)",
+        "by": { ".validate": "newData.isString() && newData.val().length <= 128" },
+        "at": { ".validate": "newData.isNumber()" },
+        "game": { ".validate": "newData.val() === 'flappy' || newData.val() === 'race' || newData.val() === 'puzzle' || newData.val() === 'quiz'" },
+        "mins": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 120" },
+        "round": { ".validate": "newData.isString() && newData.val().length <= 12" },
+        "start": { ".validate": "newData.isNumber()" },
+        "ends": { ".validate": "newData.isNumber()" },
+        "scores": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChildren(['best', 'at', 'round']) && newData.child('round').val() === root.child('arena').child($code).child('round').val() && now <= root.child('arena').child($code).child('ends').val() + 15000",
+            "best": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000000" },
+            "at": { ".validate": "newData.isNumber()" },
+            "round": { ".validate": "newData.isString()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+    "rooms": {
+      "$room": {
+        ".read": "auth != null && $room.matches(/^[a-z0-9-]{1,24}$/)",
+        "$conn": {
+          ".write": "auth != null && (newData.exists() ? newData.child('by').val() === auth.uid && (!data.exists() || data.child('by').val() === auth.uid) : data.child('by').val() === auth.uid)",
+          ".validate": "$room.matches(/^[a-z0-9-]{1,24}$/) && newData.hasChildren(['by', 'at', 'p'])",
+          "by": { ".validate": "newData.isString()" },
+          "at": { ".validate": "newData.isNumber()" },
+          "p": { ".validate": "newData.isString() && newData.val().length <= 4096" },
+          "$other": { ".validate": false }
+        }
+      }
+    }
+  }
+}

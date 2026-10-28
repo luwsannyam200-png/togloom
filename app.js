@@ -41,8 +41,13 @@ const paintMute = () => { muteBtn.textContent = muted ? 'Дуу: унтраал�
 muteBtn.onclick = () => { muted = !muted; LS.set('mute', muted); paintMute(); if (!muted) sfx('tick'); };
 paintMute();
 
-/* ---------- capabilities (absent outside Claude, e.g. GitHub Pages) ---------- */
+/* ---------- backends: Claude capabilities in the Artifact, Firebase on GitHub Pages (firebase-config.js), else solo ---------- */
 const inClaude = !!(window.claude && typeof window.claude.use === 'function');
+const FB = !inClaude && window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.databaseURL ? window.FIREBASE_CONFIG : null;
+const online = inClaude || !!FB;
+const RECONNECT = inClaude ? 'claude.ai дээр нэвтэрч нээнэ үү' : 'интернэтээ шалгаад хуудсыг дахин ачаална уу';
+let nameMem = '';   // fallback when the browser blocks localStorage (private mode)
+const myName = () => String(LS.get('nick', '') || nameMem || '').trim().slice(0, 24);
 let user = null, db = null, room = null;
 const me = { uid: null, name: '', avatar: '', color: '#888' };
 let canWrite = true, dbState = 'wait';     // wait | on | off
@@ -83,6 +88,7 @@ async function saveScore(g, v) {
       }
     } else out.team = true;
   }
+  out.arena = await arenaSubmit(g, v);
   paintBests();
   return out;
 }
@@ -125,8 +131,8 @@ async function renderBoard() {
   empty.hidden = list.length > 0;
   empty.textContent = dbState === 'off' ? 'Одоогоор амжилт алга. Тоглоод эхний оноогоо аваарай.' : 'Одоогоор оноо алга. Эхлээд тоглоод самбарт гараарай.';
   if (dbState === 'wait') note.textContent = 'Багийн самбар холбогдож байна…';
-  else if (dbState === 'off' && !inClaude) note.textContent = 'Нийтийн онооны самбар болон «Хамтдаа сорил» зөвхөн Claude дээрх хувилбарт (Artifact линк) ажиллана. Энд таны амжилт энэ төхөөрөмжид хадгалагдана.';
-  else if (dbState === 'off') note.textContent = 'Багийн самбар энэ харагдацад ажиллахгүй байна (claude.ai-д нэвтэрч нээнэ үү). Оноо тань энэ төхөөрөмжид хадгалагдана.';
+  else if (dbState === 'off' && !online) note.textContent = 'Нийтийн онооны самбар, «Хамтдаа сорил», өрөө зөвхөн онлайн хувилбарт ажиллана. Энд таны амжилт энэ төхөөрөмжид хадгалагдана.';
+  else if (dbState === 'off') note.textContent = 'Багийн самбар холбогдсонгүй (' + RECONNECT + '). Оноо тань энэ төхөөрөмжид хадгалагдана.';
   else if (!canWrite) note.textContent = 'Таны эрх зөвхөн үзэх тул оноо тань энэ төхөөрөмжид л хадгалагдана. Самбарт гарахын тулд эзэмшигчээс Contributor эрх аваарай.';
   else note.textContent = tab === 'chess'
     ? 'Шатрын оноо нь компьютерийг ялж цуглуулсан нийлбэр: Амархан 1, Дунд 3, Хүнд 5.'
@@ -136,7 +142,11 @@ $('#tabs').onclick = e => { const b = e.target.closest('button[data-tab]'); if (
 
 /* lobby presence: who is online and where */
 let where = 'hub';
-function setWhere(w) { where = w; if (room) room.presence({ where: w }).catch(() => {}); }
+function setWhere(w) {
+  where = w;
+  if (room) room.presence({ where: w }).catch(() => {});
+  if (arenaRoom) arenaRoom.presence({ where: w }).catch(() => {});
+}
 let onlineTok = 0;
 async function renderOnline() {
   const tok = ++onlineTok;
@@ -165,10 +175,124 @@ function autoStart() {
   const s = (document.body && document.body.dataset.start) || location.hash.slice(1);
   if (s && (GAMES[s] || s === 'live')) openAny(s);
 }
-function use(name) { try { return Promise.resolve(window.claude.use(name)); } catch { return Promise.resolve(null); } }
+
+/* Firebase Realtime Database + anonymous sign-in, wrapped in the same shapes the page uses from claude.use():
+   db (doc / collection / onSnapshot), room (one presence node per open page, removed on disconnect), user (names/<uid>). */
+const FB_SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
+let fbBoot = null;
+function fbInit() {
+  return fbBoot || (fbBoot = (async () => {
+    const [A, U, D] = await Promise.all(['app', 'auth', 'database'].map(m => import(FB_SDK + 'firebase-' + m + '.js')));
+    const app = A.initializeApp(FB), cred = await U.signInAnonymously(U.getAuth(app));
+    const F = { D, rdb: D.getDatabase(app), uid: cred.user.uid };
+    if (myName()) D.set(D.ref(F.rdb, 'names/' + F.uid), myName()).catch(() => {});
+    return F;
+  })());
+}
+const fbErr = e => ({ code: 'denied', message: String((e && e.message) || e) });
+function fbDb(F) {
+  const { D, rdb } = F, R = p => D.ref(rdb, p), plain = x => JSON.parse(JSON.stringify(x));
+  const snap = s => ({ id: s.key, exists: s.exists(), data: () => (s.exists() ? s.val() : undefined), metadata: {} });
+  const list = s => { const docs = []; s.forEach(c => { docs.push(snap(c)); }); return { docs, size: docs.length, empty: !docs.length, docChanges: () => [], metadata: {} }; };
+  const wrap = p => p.catch(e => { throw fbErr(e); });
+  const doc = path => ({
+    id: path.split('/').pop(), path,
+    get: () => wrap(D.get(R(path))).then(snap),
+    set: data => wrap(D.update(R(path), plain(data))),   // merge, so nested sub-collections (tours/<id>/players …) survive
+    update: data => wrap(D.update(R(path), plain(data))),
+    delete: () => wrap(D.remove(R(path))),
+    onSnapshot: (next, err) => D.onValue(R(path), s => next(snap(s)), e => err && err(fbErr(e))),
+    collection: p => col(path + '/' + p),
+  });
+  const col = path => ({
+    path,
+    doc: id => doc(path + '/' + (id || D.push(R(path)).key)),
+    get: () => wrap(D.get(R(path))).then(list),
+    onSnapshot: (next, err) => D.onValue(R(path), s => next(list(s)), e => err && err(fbErr(e))),
+  });
+  return { doc, collection: col };
+}
+function fbRoom(F, name) {
+  const { D, rdb, uid } = F, base = D.ref(rdb, 'rooms/' + name), mine = D.push(base), conn = mine.key, cbs = new Set();
+  let pres = {}, peers = [], live = true;
+  const off = D.onValue(base, s => {
+    const out = [], old = Date.now() - 6 * 3600e3;
+    s.forEach(c => {
+      const v = c.val(); if (!v || typeof v.by !== 'string' || (v.at || 0) < old) return;
+      let p = {}; try { p = JSON.parse(v.p || '{}') || {}; } catch {}
+      out.push({ peer: c.key, by: v.by, isMe: c.key === conn, kind: 'viewer', presence: p });
+    });
+    peers = out;
+    for (const f of cbs) f({ peers });
+  }, () => {});
+  D.onDisconnect(mine).remove().catch(() => {});
+  const write = () => (live ? D.set(mine, { by: uid, at: Date.now(), p: JSON.stringify(pres) }).catch(() => {}) : Promise.resolve());
+  write();
+  return {
+    peers: () => peers,
+    presence(patch) { pres = JSON.parse(JSON.stringify(Object.assign({}, pres, patch))); return write(); },
+    onPeers(fn) { cbs.add(fn); return () => cbs.delete(fn); },
+    join: async n => fbRoom(F, n),
+    leave: async () => { live = false; off(); cbs.clear(); await D.remove(mine).catch(() => {}); },
+  };
+}
+function fbUser(F) {
+  const names = new Map();
+  const one = id => {
+    if (!names.has(id)) names.set(id, F.D.get(F.D.ref(F.rdb, 'names/' + id)).then(s => (s.exists() ? String(s.val()) : ''), () => ''));
+    return names.get(id);
+  };
+  return {
+    me: async () => ({ id: F.uid, name: myName(), avatarUrl: '', color: '#888' }),
+    id: async () => F.uid,
+    can: async () => true, isOwner: () => false, canEdit: () => false,
+    async profiles(ids) {
+      const out = {};
+      await Promise.all(ids.filter(id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id))
+        .map(async id => { out[id] = { name: id === F.uid ? myName() : await one(id), avatarUrl: '' }; }));
+      return out;
+    },
+  };
+}
+async function fbUse(name) {
+  try {
+    const F = await fbInit();
+    if (name === 'db') return F.db || (F.db = fbDb(F));
+    if (name === 'user') return F.user || (F.user = fbUser(F));
+    if (name === 'room') return F.room || (F.room = fbRoom(F, 'lobby'));
+  } catch (e) { console.warn('Firebase:', e); }
+  return null;
+}
+function use(name) {
+  if (FB) return fbUse(name);
+  try { return Promise.resolve(window.claude.use(name)); } catch { return Promise.resolve(null); }
+}
+
+/* name for the link version (no accounts): kept on this device, published as names/<uid> */
+function paintNameBtn() { const b = $('#nameBtn'); b.hidden = !FB; b.textContent = 'Нэр: ' + (myName() || '—'); }
+function askName(first) {
+  return new Promise(res => {
+    const dlg = $('#nameDlg'), inp = $('#nameIn');
+    inp.value = myName(); $('#nameX').hidden = !!first; dlg.hidden = false;
+    setTimeout(() => inp.focus(), 50);
+    const done = () => {
+      const n = inp.value.trim().replace(/\s+/g, ' ').slice(0, 24);
+      if (!n) { inp.focus(); return; }
+      LS.set('nick', n); nameMem = n; me.name = n; dlg.hidden = true;
+      if (FB) fbInit().then(F => F.D.set(F.D.ref(F.rdb, 'names/' + F.uid), n)).catch(() => {});
+      paintNameBtn(); renderBoard(); arenaRender(); res(n);
+    };
+    $('#nameOk').onclick = done;
+    inp.onkeydown = e => { if (e.key === 'Enter') done(); };
+    $('#nameX').onclick = () => { dlg.hidden = true; res(null); };
+  });
+}
+$('#nameBtn').onclick = () => { sfx('tick'); askName(false); };
+
 async function boot() {
-  renderBoard(); paintBests(); renderOnline();
-  if (!inClaude) { dbState = 'off'; $('#liveFoot').textContent = 'Зөвхөн Claude дээрх хувилбарт ажиллана'; renderBoard(); autoStart(); return; }
+  renderBoard(); paintBests(); renderOnline(); arenaRender();
+  if (!online) { dbState = 'off'; $('#liveFoot').textContent = 'Зөвхөн онлайн хувилбарт ажиллана'; renderBoard(); autoStart(); return; }
+  if (FB) { if (!myName()) await askName(true); paintNameBtn(); }
   autoStart();
   use('user').then(async u => {
     user = u;
@@ -177,7 +301,7 @@ async function boot() {
       me.uid = m.id; me.name = m.name; me.avatar = m.avatarUrl; me.color = m.color;
       const cw = await u.can('data.write'); if (cw === false) canWrite = false;
     }
-    renderBoard(); paintBests(); renderOnline(); chRefresh();
+    renderBoard(); paintBests(); renderOnline(); chRefresh(); arenaRender();
   }).catch(() => {});
   use('db').then(d => {
     db = d;
@@ -185,6 +309,8 @@ async function boot() {
     dbState = 'on';
     if (!chessv.hidden && chCfg.mode === 'tour') chTourList();
     chRefresh();
+    const code = (location.hash.match(/(?:^#|&)r=([A-Za-z0-9]{4,6})/) || [])[1] || LS.get('arena', '');
+    if (code) arenaEnter(code); else arenaRender();
     d.collection('scores').onSnapshot(snap => {
       scores = new Map(snap.docs.map(x => [x.id, x.data()]));
       renderBoard(); paintBests();
@@ -195,10 +321,188 @@ async function boot() {
     room = r;
     if (!r) { renderOnline(); $('#liveFoot').textContent = 'Энэ харагдацад холбогдохгүй байна'; return; }
     r.presence({ where }).catch(() => {});
+    if (arenaCode && !arenaRoom) arenaJoinRoom(arenaCode, arenaJoining);
     r.onPeers(() => renderOnline(), () => { room = null; renderOnline(); });
     if (!chessv.hidden) chJoinRoom();
   }).catch(() => {});
 }
+
+/* ---------- Өрөө: a code-named room (db arena/<CODE>, …/scores/<uid>) for timed contests among teammates ---------- */
+const ARENA_GAMES = ['flappy', 'race', 'puzzle', 'quiz'], ARENA_MINS = [3, 5, 10, 15, 30];
+let arenaCode = '', arenaDoc = null, arenaScores = new Map(), arenaOffs = [], arenaRoom = null, arenaPeers = [], arenaErr = '', arenaJoining = 0, arenaDraft = '';
+const arenaPick = Object.assign({ game: 'flappy', mins: 10 }, LS.get('arenaPick', {}));
+if (!ARENA_GAMES.includes(arenaPick.game)) arenaPick.game = 'flappy';
+if (!ARENA_MINS.includes(arenaPick.mins)) arenaPick.mins = 10;
+const roomName = base => (arenaCode ? base + '-' + arenaCode.toLowerCase() : base);
+const arenaLink = () => location.origin + location.pathname.replace(/[^/]*$/, '') + '#r=' + arenaCode;
+const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+function arenaEnter(raw) {
+  const code = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!/^[A-Z0-9]{4,6}$/.test(code)) { arenaErr = 'Өрөөний код 4–6 үсэг, тооноос бүрдэнэ.'; arenaRender(); return; }
+  if (!db) { arenaErr = 'Сервертэй холбогдоогүй байна (' + RECONNECT + ').'; arenaRender(); return; }
+  arenaLeave();
+  const tok = ++arenaJoining;
+  arenaCode = code; arenaErr = ''; arenaDraft = '';
+  let seen = false;
+  arenaOffs.push(db.doc('arena/' + code).onSnapshot(s => {
+    if (tok !== arenaJoining) return;
+    if (!s.exists) { arenaErr = seen ? 'Өрөө хаагдлаа.' : code + ' кодтой өрөө олдсонгүй.'; arenaLeave(); return; }
+    seen = true; arenaDoc = s.data(); LS.set('arena', code);
+    loadNames([arenaDoc.by]).then(n => { if (n) arenaRender(); });
+    arenaRender();
+  }, () => {}));
+  arenaOffs.push(db.collection('arena/' + code + '/scores').onSnapshot(s => {
+    if (tok !== arenaJoining) return;
+    arenaScores = new Map(s.docs.map(x => [x.id, x.data()]));
+    loadNames([...arenaScores.keys()]).then(n => { if (n) arenaRender(); });
+    arenaRender();
+  }, () => {}));
+  arenaJoinRoom(code, tok);
+  arenaRender();
+}
+async function arenaJoinRoom(code, tok) {
+  if (!room || arenaRoom) return;
+  let r = null; try { r = await room.join('arena-' + code.toLowerCase()); } catch {}
+  if (!r) return;
+  if (tok !== arenaJoining || arenaRoom) { r.leave().catch(() => {}); return; }
+  arenaRoom = r; arenaPeers = r.peers();
+  r.onPeers(ch => { arenaPeers = ch.peers; loadNames(arenaPeers.map(p => p.by)).then(n => { if (n) arenaRender(); }); arenaRender(); }, () => {});
+  r.presence({ where, nick: myName() || null }).catch(() => {});
+  arenaRender();
+}
+function arenaLeave() {
+  arenaJoining++;
+  for (const off of arenaOffs) try { off(); } catch {}
+  arenaOffs = [];
+  if (arenaRoom) { arenaRoom.leave().catch(() => {}); arenaRoom = null; }
+  arenaPeers = []; arenaCode = ''; arenaDoc = null; arenaScores = new Map(); LS.set('arena', '');
+  arenaRender();
+}
+async function arenaCreate() {
+  if (!db || !me.uid) return;
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let k = 0; k < 5; k++) {
+    code = Array.from({ length: 5 }, () => A[Math.floor(Math.random() * A.length)]).join('');
+    const s = await db.doc('arena/' + code).get().catch(() => null);
+    if (s && !s.exists) break;
+  }
+  try {
+    await db.doc('arena/' + code).set({ by: me.uid, at: Date.now(), game: arenaPick.game, mins: arenaPick.mins, round: '', start: 0, ends: 0 });
+    sfx('good'); arenaEnter(code);
+  } catch (e) {
+    arenaErr = 'Өрөө нээж чадсангүй' + (e && e.code === 'invalid_argument' ? ': Contributor эрх хэрэгтэй.' : '. Дахин оролдоно уу.'); arenaRender();
+  }
+}
+async function arenaStart() {
+  if (!db || !arenaCode) return;
+  const now = Date.now();
+  try { await db.doc('arena/' + arenaCode).update({ game: arenaPick.game, mins: arenaPick.mins, round: rid(), start: now, ends: now + arenaPick.mins * 60000 }); sfx('good'); }
+  catch { arenaErr = 'Тэмцээн эхлүүлж чадсангүй. Дахин оролдоно уу.'; arenaRender(); }
+}
+async function arenaStop() { try { await db.doc('arena/' + arenaCode).update({ ends: Date.now() }); } catch {} }
+// a finished run counts for the room while its contest in that game is running
+async function arenaSubmit(g, v) {
+  const d = arenaDoc;
+  if (!db || !me.uid || !d || !d.round || d.game !== g || Date.now() > d.ends) return false;
+  const prev = arenaScores.get(me.uid);
+  if (prev && prev.round === d.round && !isBetter(g, v, prev.best)) return true;
+  try { await db.doc('arena/' + arenaCode + '/scores/' + me.uid).set({ best: v, at: Date.now(), round: d.round }); return true; } catch { return false; }
+}
+function arenaRows() {
+  const d = arenaDoc; if (!d || !d.round || !GAMES[d.game]) return [];
+  const out = [];
+  for (const [uid, s] of arenaScores) if (s && s.round === d.round && typeof s.best === 'number') out.push({ uid, best: s.best, at: s.at || 0 });
+  return out.sort((a, b) => (GAMES[d.game].better === 'high' ? b.best - a.best : a.best - b.best) || a.at - b.at);
+}
+function arenaSeg(items, cur, set) {
+  const s = el('div', 'seg');
+  for (const [t, v] of items) {
+    const b = chBtn(t, '', () => { set(v); LS.set('arenaPick', arenaPick); sfx('tick'); arenaRender(); });
+    b.setAttribute('aria-pressed', String(v === cur)); s.append(b);
+  }
+  return s;
+}
+function arenaRender() {
+  const box = $('#arena');
+  box.hidden = !online || dbState === 'off';
+  if (box.hidden) return;
+  const act = document.activeElement, fid = act && box.contains(act) && act.id ? act.id : null, sel = fid ? act.selectionStart : null;
+  box.replaceChildren();
+  const head = el('div', 'arhead');
+  head.append(el('h2', '', 'Өрөө'));
+  box.append(head);
+  if (!arenaCode) {
+    box.append(el('p', 'note', 'Өрөө нээгээд кодоо багийнхандаа өг. Нэг тоглоомоор тогтсон хугацаанд өрсөлдөж, хамгийн өндөр оноо авсан нь ялна. Өрөөн доторх «Хамтдаа сорил», шатарт зөвхөн өрөөнийхөн орно.'));
+    const row = el('div', 'field'), inp = el('input');
+    inp.id = 'arenaIn'; inp.maxLength = 6; inp.placeholder = 'Өрөөний код'; inp.value = arenaDraft; inp.autocapitalize = 'characters'; inp.autocomplete = 'off';
+    inp.oninput = () => { arenaDraft = inp.value.toUpperCase(); };
+    const go = chBtn('Орох', 'btn ghost', () => { sfx('tick'); arenaEnter(arenaDraft); });
+    inp.onkeydown = e => { if (e.key === 'Enter') go.click(); };
+    row.append(inp, go);
+    if (db && me.uid && canWrite) head.append(chBtn('Өрөө нээх', 'btn', () => { sfx('tick'); arenaCreate(); }));
+    box.append(row);
+    if (dbState === 'wait') box.append(el('p', 'note', 'Холбогдож байна…'));
+  } else {
+    head.append(el('span', 'code', arenaCode), chBtn('Гарах', 'btn ghost', () => { sfx('tick'); arenaErr = ''; arenaLeave(); }));
+    if (FB) {
+      const row = el('div', 'field'), link = el('input');
+      link.readOnly = true; link.value = arenaLink(); link.setAttribute('aria-label', 'Өрөөний холбоос');
+      link.onfocus = () => link.select();
+      const copy = chBtn('Холбоос хуулах', 'btn ghost', async () => {
+        try { await navigator.clipboard.writeText(link.value); copy.textContent = 'Хуулагдлаа'; } catch { link.focus(); link.select(); copy.textContent = 'Ctrl+C дарж хуулна'; }
+        setTimeout(() => { copy.textContent = 'Холбоос хуулах'; }, 2500);
+      });
+      row.append(link, copy); box.append(row);
+    } else box.append(el('p', 'note', 'Багийнхандаа «' + arenaCode + '» кодыг хэлээрэй. Тэд энэ хуудасны «Өрөө» хэсэгт кодоо бичээд орно.'));
+    const d = arenaDoc;
+    if (!d) box.append(el('p', 'note', 'Өрөөнд холбогдож байна…'));
+    else {
+      const ppl = new Map();
+      for (const p of arenaPeers) { const k = p.by || p.peer; if (p.kind === 'viewer' && (!ppl.has(k) || p.isMe)) ppl.set(k, p); }
+      if (ppl.size) {
+        const chips = el('div', 'chips');
+        for (const [k, p] of ppl) chips.append(el('span', p.isMe ? 'me' : '', (p.isMe ? 'Та' : nameCache[k] || (p.presence && typeof p.presence.nick === 'string' && p.presence.nick.slice(0, 24)) || 'Тоглогч') + ' · ' + (WHERE[p.presence && p.presence.where] || 'Нүүр')));
+        box.append(el('span', 'seglbl', 'Өрөөнд байгаа: ' + ppl.size), chips);
+      }
+      const now = Date.now(), org = d.by === me.uid, g = GAMES[d.game] ? d.game : 'flappy';
+      const running = !!d.round && now < d.ends, ended = !!d.round && now >= d.ends;
+      if (running) {
+        const st = el('div', 'arstat'); st.append(el('b', '', GAMES[g].name), el('span', 'clock', mmss(d.ends - now) + ' үлдсэн'));
+        box.append(st, chBtns(chBtn('Тоглох →', 'btn', () => openAny(g)), org ? chBtn('Зогсоох', 'btn ghost', arenaStop) : null));
+      } else if (ended) {
+        const st = el('div', 'arstat'); st.append(el('b', '', GAMES[g].name + ': тэмцээн дууслаа')); box.append(st);
+      } else box.append(el('p', 'note', org ? 'Тоглоом, хугацаагаа сонгоод тэмцээнээ эхлүүлээрэй.' : 'Тэмцээн эхлээгүй байна. Өрөө нээсэн ' + nameOf(d.by) + ' эхлүүлнэ.'));
+      const rows = arenaRows();
+      if (rows.length) {
+        if (ended) box.append(el('p', 'rec', 'Ялагч: ' + nameOf(rows[0].uid) + ', ' + GAMES[g].fmt(rows[0].best)));
+        const ol = el('ol', 'rows');
+        rows.slice(0, 20).forEach((r, i) => {
+          const li = el('li'); if (r.uid === me.uid) li.classList.add('me');
+          li.append(el('span', 'rk', String(i + 1)), el('span', 'av'), el('span', 'nm', nameOf(r.uid)), el('span', 'sc num', GAMES[g].fmt(r.best)));
+          ol.append(li);
+        });
+        box.append(ol);
+      } else if (running) box.append(el('p', 'note', 'Одоогоор оноо алга. Түрүүлж тоглоорой!'));
+      if (org && !running) {
+        box.append(el('span', 'seglbl', 'Тоглоом'), arenaSeg(ARENA_GAMES.map(x => [GAMES[x].name, x]), arenaPick.game, v => { arenaPick.game = v; }));
+        box.append(el('span', 'seglbl', 'Хугацаа'), arenaSeg(ARENA_MINS.map(m => [m + ' мин', m]), arenaPick.mins, v => { arenaPick.mins = v; }));
+        box.append(chBtns(chBtn(ended ? 'Шинэ тойрог эхлүүлэх' : 'Тэмцээн эхлүүлэх', 'btn', arenaStart)));
+      }
+      box.append(el('span', 'seglbl', 'Өрөөнийхөнтэйгээ'), chBtns(chBtn('Хамтдаа сорил', 'btn ghost', () => openAny('live')), chBtn('Шатар', 'btn ghost', () => openAny('chess'))));
+    }
+  }
+  if (arenaErr) box.append(el('p', 'note bad', arenaErr));
+  if (fid) { const e = document.getElementById(fid); if (e) { e.focus({ preventScroll: true }); try { if (sel != null) e.setSelectionRange(sel, sel); } catch {} } }
+}
+setInterval(() => {
+  const d = arenaDoc;
+  if (!d || !d.round || $('#hub').hidden) return;
+  const left = d.ends - Date.now(), c = $('#arena .clock');
+  if (left > 0 && c) c.textContent = mmss(left) + ' үлдсэн';
+  else if (c || left > -2500) arenaRender();
+}, 1000);
 
 /* ---------- views ---------- */
 const hub = $('#hub'), play = $('#play'), quizv = $('#quizv');
@@ -217,7 +521,7 @@ function openAny(k) {
 document.addEventListener('click', e => { if (e.target.closest('[data-back]')) goHub(); });
 function goHub() {
   stopGame(); stopQuiz(); stopChess();
-  showView('hub'); setWhere('hub'); renderBoard(); paintBests();
+  showView('hub'); setWhere('hub'); renderBoard(); paintBests(); arenaRender();
 }
 
 /* ---------- canvas runner ---------- */
@@ -293,6 +597,7 @@ async function over() {
     const rk = rankOf(k, me.uid);
     $('#ovSaved').textContent = rk ? 'Багийн самбарт ' + rk.pos + '-р байр (' + rk.of + ' хүнээс).' : 'Багийн самбарт хадгалагдлаа.';
   } else $('#ovSaved').textContent = 'Энэ төхөөрөмжид хадгалагдлаа.';
+  if (r.arena) $('#ovSaved').textContent += ' Өрөөний тэмцээнд бүртгэгдлээ.';
 }
 $('#rdGo').onclick = e => { e.stopPropagation(); startRun(); if (game && game.key === 'flappy') game.input('up'); };
 $('#ovAgain').onclick = e => { e.stopPropagation(); sfx('tick'); startRun(); };
@@ -703,7 +1008,8 @@ function makeSolo() {
       const r = await saveScore('quiz', pts);
       if (Q !== S) return;
       const rk = r.team ? rankOf('quiz', me.uid) : null;
-      saved.textContent = (r.localRecord ? 'Шинэ дээд амжилт! ' : 'Таны дээд: ' + GAMES.quiz.fmt(r.prev) + '. ') + (rk ? 'Багийн самбарт ' + rk.pos + '-р байр.' : r.team ? 'Багийн самбарт хадгалагдлаа.' : 'Энэ төхөөрөмжид хадгалагдлаа.');
+      saved.textContent = (r.localRecord ? 'Шинэ дээд амжилт! ' : 'Таны дээд: ' + GAMES.quiz.fmt(r.prev) + '. ') + (rk ? 'Багийн самбарт ' + rk.pos + '-р байр.' : r.team ? 'Багийн самбарт хадгалагдлаа.' : 'Энэ төхөөрөмжид хадгалагдлаа.')
+        + (r.arena ? ' Өрөөний тэмцээнд бүртгэгдлээ.' : '');
     },
     stop() { cancelAnimationFrame(timer); clearTimeout(next); },
   };
@@ -800,7 +1106,8 @@ function makeLive() {
     const f = el('div', 'field');
     const inp = el('input'); inp.id = 'nick'; inp.maxLength = 24; inp.placeholder = 'Нэр (заавал биш)'; inp.value = nick;
     inp.onchange = () => { nick = inp.value.trim().slice(0, 24); LS.set('nick', nick); lq && lq.presence({ nick: nick || null }).catch(() => {}); };
-    f.append(inp); box.append(f);
+    f.append(inp);
+    if (!FB) box.append(f);   // the link version already asked for a name
     const src = el('div', 'chopts qsrc'), seg = el('div', 'seg');
     const opt = (label, path) => { const b = chBtn(label, '', () => { pickSet = path; LS.set('liveSet', path); sfx('tick'); renderLobby(); }); b.setAttribute('aria-pressed', String(pickSet === path)); seg.append(b); };
     opt('Бэлэн асуулт · ' + QN, '');
@@ -810,7 +1117,7 @@ function makeLive() {
     if (db && me.uid && canWrite) {
       const tools = chBtns(chBtn('＋ Өөрийн асуулт бэлдэх', 'btn ghost', () => openEditor(null)), cur ? chBtn('Засах', 'btn ghost', () => openEditor(cur)) : null);
       tools.style.justifyContent = 'flex-start'; src.append(tools);
-    } else if (inClaude) src.append(el('p', 'note', 'Өөрийн асуултаар тэмцээн зохиоход claude.ai дээр нэвтэрсэн, Contributor эрхтэй байх хэрэгтэй.'));
+    } else if (online) src.append(el('p', 'note', inClaude ? 'Өөрийн асуултаар тэмцээн зохиоход claude.ai дээр нэвтэрсэн, Contributor эрхтэй байх хэрэгтэй.' : 'Өөрийн асуулт хадгалахад сервертэй холбогдох хэрэгтэй (' + RECONNECT + ').'));
     box.append(src);
     const here = peersCache.filter(p => p.kind === 'viewer');
     box.append(el('p', 'note', 'Одоо энд: ' + here.length + ' хүн' + (here.length < 2 ? '. Бусдыгаа дуудаарай!' : '.')));
@@ -1010,12 +1317,13 @@ function makeLive() {
       qSide.hidden = false;
       qMain.replaceChildren(el('p', 'empty', 'Багийн өрөөнд холбогдож байна…'));
       if (!room) {
-        qMain.replaceChildren(el('p', 'empty', inClaude
-          ? 'Хамтдаа горим энэ харагдацад ажиллахгүй байна. Хуудсыг claude.ai дээр нэвтэрч нээгээрэй. Ганцаараа «Мэдлэгийн сорил» тоглож болно.'
-          : 'Хамтдаа сорил зөвхөн Claude дээрх хувилбарт (Artifact линк) ажиллана. Энд ганцаараа «Мэдлэгийн сорил» тоглоорой.'));
+        qMain.replaceChildren(el('p', 'empty', online
+          ? 'Хамтдаа горим холбогдсонгүй (' + RECONNECT + '). Ганцаараа «Мэдлэгийн сорил» тоглож болно.'
+          : 'Хамтдаа сорил зөвхөн онлайн хувилбарт ажиллана. Энд ганцаараа «Мэдлэгийн сорил» тоглоорой.'));
         qSide.hidden = true; return;
       }
-      try { lq = await room.join('quiz'); } catch { lq = null; }
+      if (arenaCode) $('#qTitle').textContent = 'Хамтдаа сорил · ' + arenaCode;
+      try { lq = await room.join(roomName('quiz')); } catch { lq = null; }
       if (stopped) { lq && lq.leave().catch(() => {}); return; }
       if (!lq) { qMain.replaceChildren(el('p', 'empty', 'Багийн өрөөнд холбогдож чадсангүй. Түр хүлээгээд дахин нээнэ үү.')); qSide.hidden = true; return; }
       lq.presence({ nick: nick || null, g: null, s: null, a: null }).catch(() => {});
@@ -1635,7 +1943,7 @@ const validInv = x => !!x && isId(x.id, 12) && isId(x.to) && isId(x.w) && (x.tou
 async function chJoinRoom() {
   if (cq || cqJoining || !room) return;
   cqJoining = true;
-  let r = null; try { r = await room.join('chess'); } catch {}
+  let r = null; try { r = await room.join(roomName('chess')); } catch {}
   cqJoining = false;
   if (!r) { chRefresh(); return; }
   if (chessv.hidden) { r.leave().catch(() => {}); return; }
@@ -1740,7 +2048,7 @@ function chInvitesInto(box) {
   }
 }
 function bodyNet(box) {
-  if (!inClaude || !room) { box.append(el('p', 'note', inClaude ? 'Онлайн тоглолт энэ харагдацад холбогдохгүй байна. claude.ai дээр нэвтэрч нээгээрэй.' : 'Онлайн тоглолт зөвхөн Claude дээрх хувилбарт (Artifact линк) ажиллана.')); return; }
+  if (!online || !room) { box.append(el('p', 'note', online ? 'Онлайн тоглолт холбогдсонгүй (' + RECONNECT + ').' : 'Онлайн тоглолт зөвхөн онлайн хувилбарт ажиллана.')); return; }
   if (!cq) { box.append(el('p', 'note', 'Шатрын өрөөнд холбогдож байна…')); chJoinRoom(); return; }
   const myK = cqKey();
   chInvitesInto(box);
@@ -1846,7 +2154,7 @@ async function tourOnlineResult(g) {
 function bodyTour(box) {
   chInvitesInto(box);
   if (!db || !me.uid) {
-    box.append(el('p', 'note', !inClaude ? 'Тэмцээн зөвхөн Claude дээрх хувилбарт (Artifact линк) ажиллана.' : dbState === 'wait' ? 'Холбогдож байна…' : 'Тэмцээн зохиоход claude.ai дээр нэвтэрч нээх хэрэгтэй.'));
+    box.append(el('p', 'note', !online ? 'Тэмцээн зөвхөн онлайн хувилбарт ажиллана.' : dbState === 'wait' ? 'Холбогдож байна…' : 'Тэмцээн зохиоход сервертэй холбогдох хэрэгтэй (' + RECONNECT + ').'));
     return;
   }
   chTourList();

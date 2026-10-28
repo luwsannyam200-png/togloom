@@ -21,9 +21,12 @@
     </div>
     <div class="who">
       <div class="online" id="online" title="Энэ хуудсыг яг одоо нээсэн хүмүүс"><span class="dot"></span><span class="faces" id="faces"></span><span id="onlineTxt">Ганцаараа</span></div>
+      <button class="iconbtn" id="nameBtn" type="button" hidden>Нэр</button>
       <button class="iconbtn" id="mute" type="button">Дуу: асаалттай</button>
     </div>
   </header>
+
+  <section class="arena" id="arena" aria-label="Өрөө" hidden></section>
 
   <div class="layout">
     <section class="tiles" aria-label="Тоглоомууд">
@@ -160,6 +163,13 @@
   </div>
 </section>
 
+<div class="ov dim namedlg" id="nameDlg" hidden><div class="card">
+  <h3>Нэрээ бичээрэй</h3>
+  <p>Онооны самбар, өрөөнд энэ нэрээр харагдана. Энэ төхөөрөмж нэрийг тань санана, бүртгэл үүсгэх шаардлагагүй.</p>
+  <div class="field"><input id="nameIn" maxlength="24" placeholder="Нэр" autocomplete="nickname"></div>
+  <div class="btns"><button class="btn" type="button" id="nameOk">Үргэлжлүүлэх</button><button class="btn ghost" type="button" id="nameX" hidden>Болих</button></div>
+</div></div>
+
 <section class="view" id="chessv" hidden>
   <div class="bar">
     <button class="back" type="button" data-back>← Буцах</button>
@@ -203,6 +213,7 @@
     </div></div>
   </div>
 </section>
+<script src="firebase-config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
