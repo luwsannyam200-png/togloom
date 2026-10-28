@@ -72,6 +72,18 @@ input{border:1px solid var(--line);border-radius:10px;padding:9px 11px;backgroun
 button.seat.free:hover{border-color:var(--accent);color:var(--ink)}
 .msg{font-weight:700;color:var(--accent);min-height:20px;text-align:center}
 .note{font-size:12.5px;color:var(--muted);margin:0}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.cardbtn{display:flex;flex-direction:column;align-items:center;gap:2px;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:7px 2px;font-size:11.5px;font-weight:600;line-height:1.15;text-align:center}
+.cardbtn .ic{font-size:20px;line-height:1}
+.cardbtn:not(:disabled):hover{border-color:var(--accent)}
+.cardbtn.on{border-color:var(--accent);background:var(--accent-soft)}
+.cardbtn.used{opacity:.35;text-decoration:line-through}
+.cardbtn:disabled{cursor:default}
+.cardbtn:disabled:not(.used){opacity:.6}
+.pl .ck{font-size:12px;letter-spacing:1px;white-space:nowrap}
+.pl .ck i{font-style:normal}
+.pl .ck i.used{opacity:.22}
+.pass{justify-self:start}
 </style>
 </head>
 <body>
@@ -87,6 +99,8 @@ button.seat.free:hover{border-color:var(--accent);color:var(--ink)}
     <aside class="side">
       <div class="panel">
         <div class="dice"><button type="button" id="die" aria-label="Шоо хаях" disabled></button><div><div id="hint">—</div><p class="note" id="sub"></p></div></div>
+        <div class="cards" id="cards" hidden></div>
+        <button class="btn ghost sm pass" type="button" id="passBtn" hidden>Ээлжээ алгасах</button>
       </div>
       <div class="panel">
         <span class="label" id="modeLbl">Тоглогчид</span>
@@ -167,11 +181,41 @@ function spot(c, i, r) {   // centre of a token in cell units
   return FIN[c];
 }
 // S = { k tokens each, on: [colours playing], p: [[r × 4] × 4], t: whose turn, d: roll (0 = must roll), s: sixes in a row, w: winner (-1), n: move count }
-function newGame(on, k) {
+// skill cards: each player holds all four, each usable once a game (S.u = used bits per colour)
+const SKILLS = [
+  { k: 'shield', i: '🛡', n: 'Бамбай', d: 'Нэг бөмбөгөө 2 тойрог цохиулахгүй болгоно.' },
+  { k: 'reroll', i: '🎲', n: 'Дахин хаях', d: 'Буусан шоогоо дахин хаяна.' },
+  { k: 'double', i: '⚡', n: 'Хоёр дахин', d: 'Буусан тоогоо хоёр дахин алхана.' },
+  { k: 'launch', i: '🚀', n: 'Шууд гаргах', d: 'Шоо хаяхаас өмнө суурийн бөмбөгөө 6-гүйгээр гаргана.' },
+];
+const SK = Object.fromEntries(SKILLS.map((s, j) => [s.k, j]));
+function newGame(on, k, sk) {
   const p = [0, 1, 2, 3].map(() => [-1, -1, -1, -1].map((v, i) => (i < k ? -1 : END)));   // unused tokens sit at home
-  return { k, on: on.slice().sort(), p, t: Math.min(...on), d: 0, s: 0, w: -1, n: 0 };
+  // o: the roll as thrown (d may be doubled), x: a card already changed this roll, h: shields [{c, i, until: move count}]
+  return { k, on: on.slice().sort(), p, t: Math.min(...on), d: 0, s: 0, w: -1, n: 0, sk: !!sk, u: [0, 0, 0, 0], h: [], o: 0, x: 0 };
 }
-const clone = S => ({ ...S, on: S.on.slice(), p: S.p.map(a => a.slice()) });
+const clone = S => ({ ...S, on: S.on.slice(), p: S.p.map(a => a.slice()), u: (S.u || [0, 0, 0, 0]).slice(), h: (S.h || []).map(x => ({ ...x })) });
+const shielded = (S, c, i) => (S.h || []).some(x => x.c === c && x.i === i && x.until > S.n);
+const hasCard = (S, c, k) => !!S.sk && !((S.u || [])[c] & (1 << SK[k]));
+function canSkill(S, c, k) {
+  if (!S || S.w >= 0 || S.t !== c || !hasCard(S, c, k)) return false;
+  if (k === 'launch') return !S.d && S.p[c].some((r, i) => i < S.k && r < 0);
+  if (k === 'shield') return shieldable(S, c).length > 0;
+  if (k === 'reroll') return S.d > 0 && !S.x;
+  if (k === 'double') return S.d > 0 && !S.x && legal(S, c, S.o * 2).length > 0;
+  return false;
+}
+const shieldable = (S, c) => S.p[c].map((r, i) => i).filter(i => i < S.k && S.p[c][i] >= 0 && S.p[c][i] <= 50 && !shielded(S, c, i));
+const launchable = (S, c) => S.p[c].map((r, i) => i).filter(i => i < S.k && S.p[c][i] < 0);
+function skill(S0, k, i, d) {   // -> the state after playing card k (i: the token for shield/launch, d: the new roll for reroll)
+  const S = clone(S0), c = S.t;
+  S.u[c] |= 1 << SK[k]; S.n = S0.n + 1;
+  if (k === 'shield') S.h.push({ c, i, until: S.n + 4 * S.on.length });   // about two rounds of turns
+  if (k === 'launch') S.p[c][i] = 0;                                     // the start square is safe: nobody is hit
+  if (k === 'reroll') { S.s = S0.s - (S0.o === 6 ? 1 : 0) + (d === 6 ? 1 : 0); S.d = S.o = d; S.x = 1; }
+  if (k === 'double') { S.d = S.o * 2; S.x = 1; }
+  return S;
+}
 function legal(S, c, d) {
   const out = [];
   S.p[c].forEach((r, i) => { if (r < 0 ? d === 6 : r < END && r + d <= END) out.push(i); });
@@ -182,24 +226,26 @@ function move(S0, c, i, d) {   // -> { S, cap: [[c,i]...], home }
   let r = S.p[c][i];
   r = r < 0 ? 0 : r + d;
   S.p[c][i] = r;
-  if (r <= 50 && !SAFE.has(sq(c, r))) {
+  if (r <= 50 && !SAFE.has(sq(c, r))) {   // a shielded token is not hit
     const at = sq(c, r);
-    for (const o of S.on) if (o !== c) S.p[o].forEach((ro, j) => { if (ro >= 0 && ro <= 50 && sq(o, ro) === at) { S.p[o][j] = -1; cap.push([o, j]); } });
+    for (const o of S.on) if (o !== c) S.p[o].forEach((ro, j) => { if (ro >= 0 && ro <= 50 && sq(o, ro) === at && !shielded(S, o, j)) { S.p[o][j] = -1; cap.push([o, j]); } });
   }
   const home = r === END;
+  if (home) S.h = (S.h || []).filter(x => !(x.c === c && x.i === i));
   if (S.p[c].every(v => v === END)) S.w = c;
   return { S, cap, home };
 }
 const nextOf = (S, c) => { for (let k = 1; k <= 4; k++) { const o = (c + k) % 4; if (S.on.includes(o)) return o; } return c; };
-function after(S0, c, d, res) {   // whose turn after a move
+function after(S0, c, d, res) {   // whose turn after a move; d is the roll as thrown (a doubled 3 is not a 6)
   const S = res.S;
-  S.d = 0; S.n = S0.n + 1;
+  S.d = 0; S.o = 0; S.x = 0; S.n = S0.n + 1;
+  S.h = (S.h || []).filter(x => x.until > S.n);
   if (S.w >= 0) return S;
   if (d === 6 || res.cap.length || res.home) { S.t = c; if (d !== 6) S.s = 0; }
   else { S.t = nextOf(S, c); S.s = 0; }
   return S;
 }
-function passTurn(S0) { const S = clone(S0); S.t = nextOf(S, S.t); S.d = 0; S.s = 0; S.n = S0.n + 1; return S; }
+function passTurn(S0) { const S = clone(S0); S.t = nextOf(S, S.t); S.d = 0; S.o = 0; S.x = 0; S.s = 0; S.n = S0.n + 1; S.h = S.h.filter(x => x.until > S.n); return S; }
 // the computer's choice: finish > capture > leave base > safe or home lane > keep out of reach; then the furthest token
 function threat(S, c, r) {
   if (r < 0 || r > 50 || SAFE.has(sq(c, r))) return 0;
@@ -212,7 +258,7 @@ function threat(S, c, r) {
   }
   return n;
 }
-function botPick(S, c, d) {
+function botBest(S, c, d) {   // -> { i, v } the best move and how good it is
   let best = null, bv = -1e9;
   for (const i of legal(S, c, d)) {
     const r0 = S.p[c][i], res = move(S, c, i, d), r = res.S.p[c][i];
@@ -222,10 +268,26 @@ function botPick(S, c, d) {
     if (r0 < 0) v += 60;
     if (r > 50 && r0 <= 50) v += 30;
     if (r <= 50 && SAFE.has(sq(c, r))) v += 25;
-    v += threat(S, c, r0) * 20 - threat(res.S, c, r) * 40;
+    v += (shielded(S, c, i) ? 0 : threat(S, c, r0) * 20) - (shielded(res.S, c, i) ? 0 : threat(res.S, c, r) * 40);
     if (v > bv) { bv = v; best = i; }
   }
-  return best;
+  return { i: best, v: bv };
+}
+const botPick = (S, c, d) => botBest(S, c, d).i;
+function botCard(S, c) {   // a card the computer would play now, or null: [k, token]
+  if (!S.sk) return null;
+  if (!S.d) {
+    if (canSkill(S, c, 'launch') && S.p[c].every((r, i) => i >= S.k || r < 0 || r === END)) return ['launch', launchable(S, c)[0]];
+    if (canSkill(S, c, 'shield')) {
+      const risky = shieldable(S, c).filter(i => S.p[c][i] >= 20 && threat(S, c, S.p[c][i]) > 0).sort((a, b) => S.p[c][b] - S.p[c][a]);
+      if (risky.length) return ['shield', risky[0]];
+    }
+    return null;
+  }
+  const now = botBest(S, c, S.d);
+  if (canSkill(S, c, 'double')) { const two = botBest(S, c, S.o * 2); if (two.v >= now.v + 60) return ['double']; }   // doubling reaches a hit or home
+  if (canSkill(S, c, 'reroll') && (now.i == null || now.v < -20)) return ['reroll'];
+  return null;
 }
 
 /* ---------- drawing ---------- */
@@ -307,6 +369,11 @@ function draw() {
     cx.fillStyle = COL[t.c].d; cx.beginPath(); cx.arc(x, y, r, 0, 7); cx.fill();
     cx.fillStyle = COL[t.c].c; cx.beginPath(); cx.arc(x, y - r * 0.12, r * 0.8, 0, 7); cx.fill();
     cx.fillStyle = 'rgba(255,255,255,.75)'; cx.beginPath(); cx.arc(x - r * 0.25, y - r * 0.4, r * 0.22, 0, 7); cx.fill();
+    if (G && shielded(G, t.c, t.i)) {   // a shield: a bright ring and a small badge
+      cx.strokeStyle = '#5CC8FF'; cx.lineWidth = 3; cx.beginPath(); cx.arc(x, y, r + 3, 0, 7); cx.stroke();
+      cx.font = Math.round(r * 0.9) + 'px "Segoe UI Emoji","Apple Color Emoji",sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+      cx.fillText('🛡', x + r * 0.75, y - r * 0.75);
+    }
   }
 }
 function dieSvg(n) {
@@ -330,17 +397,36 @@ function paintSide() {
   for (const c of G.on) {
     const d = el('div', 'pl' + (c === G.t && G.w < 0 ? ' turn' : '')), dot = el('span', 'dot'); dot.style.background = COL[c].c;
     const home = G.p[c].slice(0, G.k).filter(r => r === END).length;
-    d.append(dot, el('span', 'nm', who(c) + (isMine(c) && mode === 'net' ? ' (та)' : '')), el('span', 'hm', home + '/' + G.k + ' гэрт'));
+    const right = el('span', 'hm', home + '/' + G.k + ' гэрт');
+    if (G.sk) { const ck = el('span', 'ck'); for (const s of SKILLS) { const x = el('i', hasCard(G, c, s.k) ? '' : 'used', s.i); x.title = s.n; ck.append(x); } right.prepend(ck, document.createTextNode(' ')); }
+    d.append(dot, el('span', 'nm', who(c) + (isMine(c) && mode === 'net' ? ' (та)' : '')), right);
     box.append(d);
   }
   const die = $('#die'), me = isMine(G.t), canRoll = G.w < 0 && me && !G.d && !anim && !busy;
-  die.disabled = !canRoll; die.innerHTML = dieSvg(G.d);
-  picks = G.w < 0 && me && G.d && !busy ? legal(G, G.t, G.d) : [];
-  $('#hint').textContent = G.w >= 0 ? who(G.w) + ' яллаа!' : me ? (G.d ? (picks.length ? 'Хөдөлгөх бөмбөгөө товш' : 'Явах нүүдэл алга') : 'Шоогоо хая') : who(G.t) + '-ийн ээлж';
-  $('#sub').textContent = G.w >= 0 ? '' : me && !G.d ? (mode === 'net' ? 'Шоо дээр товш эсвэл Space' : 'Шоо дээр товш') : '';
+  die.disabled = !canRoll || !!pickCard; die.innerHTML = dieSvg(G.d);
+  if (!me || G.w >= 0) pickCard = null;
+  picks = !me || G.w >= 0 || busy ? [] : pickCard ? (pickCard === 'shield' ? shieldable(G, G.t) : launchable(G, G.t)) : G.d ? legal(G, G.t, G.d) : [];
+  const stuck = me && G.w < 0 && G.d && !busy && !legal(G, G.t, G.d).length;
+  $('#hint').textContent = G.w >= 0 ? who(G.w) + ' яллаа!'
+    : pickCard ? (pickCard === 'shield' ? '🛡 Бамбайлах бөмбөгөө товш' : '🚀 Гаргах бөмбөгөө товш')
+    : me ? (G.d ? (picks.length ? 'Хөдөлгөх бөмбөгөө товш' : 'Явах нүүдэл алга') : 'Шоогоо хая') : who(G.t) + '-ийн ээлж';
+  $('#sub').textContent = G.w >= 0 ? '' : stuck && G.sk ? 'Карт ашиглах эсвэл ээлжээ алгасна уу.' : G.x && G.o && G.d !== G.o ? '⚡ ' + G.o + ' × 2 = ' + G.d : me && !G.d ? (mode === 'net' ? 'Шоо дээр товш эсвэл Space' : 'Шоо дээр товш') : '';
+  $('#passBtn').hidden = !stuck;
+  // my cards: on my turn the usable ones light up; shield and launch then ask for a token
+  const bar = $('#cards'); bar.hidden = !G.sk; bar.replaceChildren();
+  if (G.sk) {
+    const mineC = me ? G.t : mode === 'net' ? seats.findIndex(s => s && s.u === uid) : G.t;
+    for (const s of SKILLS) {
+      const has = mineC >= 0 && hasCard(G, mineC, s.k), b = el('button', 'cardbtn' + (has ? '' : ' used') + (pickCard === s.k ? ' on' : ''));
+      b.type = 'button'; b.title = s.n + ': ' + s.d; b.append(el('span', 'ic', s.i), el('span', '', s.n));
+      b.disabled = !me || busy || !!anim || !canSkill(G, G.t, s.k);
+      b.onclick = () => useCard(s.k);
+      bar.append(b);
+    }
+  }
   $('#modeLbl').textContent = mode === 'net' ? 'Ширээ · ' + (CODE ? 'өрөө ' + CODE : 'нийтийн') : mode === 'local' ? 'Нэг дэлгэцээр' : 'Компьютертэй';
 }
-let busy = false;
+let busy = false, pickCard = null;   // pickCard: 'shield' | 'launch' while the player chooses the token for it
 function show(S, why) {   // put a new state on screen, animating the token that moved
   const prev = G;
   if (prev && S && S.n === prev.n + 1 && why && why.c != null) {
@@ -368,22 +454,54 @@ async function roll() {
   const die = $('#die'); die.classList.remove('roll'); void die.offsetWidth; die.classList.add('roll');
   await new Promise(r => setTimeout(r, 420));
   const d = 1 + Math.floor(Math.random() * 6), S = clone(G), c = G.t;
-  S.d = d; S.s = d === 6 ? G.s + 1 : 0; S.n = G.n + 1;
+  S.d = S.o = d; S.x = 0; S.s = d === 6 ? G.s + 1 : 0; S.n = G.n + 1; pickCard = null;
   if (d === 6) sfx('six');
   busy = false;
   await commit(S, null);
+  afterRoll(S, c);
+}
+// after a roll (or a card that changed it) a player at this device moves on by itself where nothing is left to choose;
+// the computer and stand-ins decide in their own loop
+function afterRoll(S, c) {
+  if (!isMine(c)) return;
   const still = () => G && G.n === S.n && G.w < 0;   // nobody moved meanwhile (online G is replaced by the snapshot copy)
   if (S.s >= 3) { log(who(c) + ': 6 гурав дараалсан тул ээлж шилжлээ'); setTimeout(() => still() && commit(passTurn(G), null), 900); return; }
-  const opts = legal(S, c, d);
-  if (!opts.length) { log(who(c) + ': ' + d + ', явах нүүдэл алга'); setTimeout(() => still() && commit(passTurn(G), null), 900); return; }
+  const opts = legal(S, c, S.d), cards = canSkill(S, c, 'reroll') || canSkill(S, c, 'double');
+  if (!opts.length) {
+    if (cards) return;   // a card may still help: the player plays one or passes
+    log(who(c) + ': ' + S.d + ', явах нүүдэл алга'); setTimeout(() => still() && commit(passTurn(G), null), 900); return;
+  }
+  if (cards) return;   // with a card in hand the player moves by hand
   const same = opts.every(i => S.p[c][i] < 0);   // every choice is a token leaving base: all alike
   if (opts.length === 1 || same) setTimeout(() => still() && play(opts[0]), 450);
+}
+async function useCard(k, i) {
+  if (!G || busy || anim || !canSkill(G, G.t, k)) return;
+  const c = G.t;
+  if ((k === 'shield' || k === 'launch') && i == null) {
+    const opts = k === 'shield' ? shieldable(G, c) : launchable(G, c);
+    if (opts.length !== 1) { pickCard = pickCard === k ? null : k; paintSide(); return; }
+    i = opts[0];
+  }
+  pickCard = null;
+  let d;
+  if (k === 'reroll') {
+    busy = true; sfx('roll');
+    const die = $('#die'); die.classList.remove('roll'); void die.offsetWidth; die.classList.add('roll');
+    await new Promise(r => setTimeout(r, 420));
+    d = 1 + Math.floor(Math.random() * 6); busy = false;
+  }
+  const S = skill(G, k, i, d), card = SKILLS[SK[k]];
+  log(who(c) + ': ' + card.i + ' ' + card.n + (k === 'reroll' ? ' → ' + d : k === 'double' ? ' → ' + S.d : ''));
+  sfx(k === 'double' || d === 6 ? 'six' : 'home');
+  await commit(S, k === 'launch' ? { c, i } : null);
+  if (k === 'reroll' || k === 'double') afterRoll(S, c);
 }
 async function play(i) {
   if (!G || !G.d || busy) return;
   const c = G.t, d = G.d;
   if (!legal(G, c, d).includes(i)) return;
-  const res = move(G, c, i, d), S = after(G, c, d, res);
+  const res = move(G, c, i, d), S = after(G, c, G.o || d, res);
   log(describe(G, S, d, c, i, res.cap, res.home));
   if (res.cap.length) sfx('cap'); else if (res.home) sfx('home'); else sfx('step');
   await commit(S, { c, i });
@@ -402,13 +520,15 @@ cv.addEventListener('click', e => {
   const b = cv.getBoundingClientRect(), x = (e.clientX - b.left) / CELL, y = (e.clientY - b.top) / CELL;
   let best = null, bd = 0.8;
   for (const t of tokenSpots(G)) if (t.c === G.t && picks.includes(t.i)) { const dd = Math.hypot(t.x - x, t.y - y); if (dd < bd) { bd = dd; best = t.i; } }
-  if (best != null) play(best);
+  if (best != null) (pickCard ? useCard(pickCard, best) : play(best));
 });
 $('#die').onclick = () => roll();
+$('#passBtn').onclick = () => { if (G && isMine(G.t) && G.d && !legal(G, G.t, G.d).length) { log(who(G.t) + ': ' + G.d + ', ээлжээ алгаслаа'); commit(passTurn(G), null); } };
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
-  if (e.code === 'Space' && G && isMine(G.t) && !G.d) { e.preventDefault(); roll(); }
-  if (/^Digit[1-4]$/.test(e.code) && picks.length) { const i = +e.code.slice(5) - 1; if (picks.includes(i)) play(i); }
+  if (e.code === 'Escape' && pickCard) { pickCard = null; paintSide(); return; }
+  if (e.code === 'Space' && G && isMine(G.t) && !G.d && !pickCard) { e.preventDefault(); roll(); }
+  if (/^Digit[1-4]$/.test(e.code) && picks.length) { const i = +e.code.slice(5) - 1; if (picks.includes(i)) (pickCard ? useCard(pickCard, i) : play(i)); }
 });
 // the computer (and, online, the table host for players who are away) acts on its own
 let autoAt = 0;
@@ -418,8 +538,12 @@ setInterval(() => {
   if (!actor) return;
   if (performance.now() < autoAt) return;
   autoAt = performance.now() + 700;
-  if (!G.d) { if (actor === 'bot' || actor === 'away') roll(); return; }
-  if (actor === 'bot' || actor === 'away') { const i = botPick(G, c, G.d); if (i != null) play(i); }
+  const card = actor === 'bot' ? botCard(G, c) : null;   // cards are the player's own: a stand-in does not spend them
+  if (card) { useCard(card[0], card[1]); return; }
+  if (!G.d) { roll(); return; }
+  if (G.s >= 3) { log(who(c) + ': 6 гурав дараалсан тул ээлж шилжлээ'); commit(passTurn(G), null); return; }
+  const i = botPick(G, c, G.d);
+  if (i != null) play(i); else { log(who(c) + ': ' + G.d + ', явах нүүдэл алга'); commit(passTurn(G), null); }
 }, 250);
 function autoActor(c) {
   const s = seats[c];
@@ -494,20 +618,27 @@ function lobby() {
     nodes.push(el('p', '', 'Нэг утас, notebook-оо ээлжилж тоглоно.'), el('div', 'sub', 'Тоглогч'), seg([['2', 2], ['3', 3], ['4', 4]], setup.local, v => { setup.local = v; }));
   }
   nodes.push(el('div', 'sub', 'Бөмбөг'), seg([['2 (хурдан)', 2], ['4 (бүтэн)', 4]], setup.k, v => { setup.k = v; }));
+  if (setup.sk == null) setup.sk = true;
+  nodes.push(el('div', 'sub', 'Ур чадварын карт'), seg([['🃏 Карттай', true], ['Энгийн', false]], setup.sk, v => { setup.sk = v; }));
   LS.set('ludoSetup', setup);
   const r = el('div', 'row'); r.append(btn('Эхлэх', 'btn', () => startLocal(tab, setup)));
   if (G && G.w < 0 && mode !== 'net') r.append(btn('Үргэлжлүүлэх', 'btn ghost', hideCard));
   nodes.push(r, rulesNote());
   showCard(...nodes);
 }
-function rulesNote() { return el('p', 'note', '6 буувал бөмбөг гарна, дахин хаяна. Өрсөлдөгчийн бөмбөг дээр буувал түүнийг гэрт нь буцаана (★ ба гарааны нүдэнд цохиулахгүй). Гэрт яг таарах тоогоор орно. Дөрвөн бөмбөгөө түрүүлж оруулсан нь ялна.'); }
+function rulesNote() {
+  const box = el('div', '');
+  box.append(el('p', 'note', '6 буувал бөмбөг гарна, дахин хаяна. Өрсөлдөгчийн бөмбөг дээр буувал түүнийг гэрт нь буцаана (★ ба гарааны нүдэнд цохиулахгүй). Гэрт яг таарах тоогоор орно. Бөмбөгөө бүгдийг түрүүлж оруулсан нь ялна.'),
+    el('p', 'note', '🃏 Карттай тоглолтод хүн бүр 4 карттай, тус бүрийг нэг удаа: ' + SKILLS.map(s => s.i + ' ' + s.n + ' (' + s.d.replace(/\.$/, '').toLowerCase() + ')').join(', ') + '.'));
+  return box;
+}
 function startLocal(kind, st) {
   mode = kind; table = null;
   const n = kind === 'bot' ? st.n : st.local, on = n === 2 ? [0, 2] : n === 3 ? [0, 1, 2] : [0, 1, 2, 3];
   seats = [];
   on.forEach((c, j) => { seats[c] = kind === 'bot' ? (j === 0 ? { u: 'local', n: myName || 'Та' } : { u: 'bot', n: 'Компьютер ' + j }) : { u: 'local', n: COL[c].n }; });
   logLines = []; log('Шинэ тоглоом');
-  G = null; show(newGame(on, st.k)); hideCard();
+  G = null; pickCard = null; show(newGame(on, st.k, st.sk !== false)); hideCard();
 }
 $('#menuBtn').onclick = () => { if (mode === 'net' && table) netLobbyCard(); else lobby(); };
 
@@ -517,12 +648,19 @@ let D = null, rdb = null, uid = 'local', net = false, offset = 0, tables = {};
 const now = () => Date.now() + offset;
 const R = p => D.ref(rdb, 'ludo/' + M + (p ? '/' + p : ''));
 const TR = p => R(table.id + (p ? '/' + p : ''));
-function enc(S) { return { t: S.t, d: S.d, s: S.s, w: S.w, n: S.n, on: S.on.join(''), p: S.p.map(a => a.join(',')).join(';'), at: now(), mv: lastSent && lastSent.why ? lastSent.why.c * 4 + lastSent.why.i : -1 }; }
+// cards travel as sk (on/off), u ("0f00": used bits per colour, hex), h ("c.i.until;…" shields), o (roll as thrown), x (a card changed this roll)
+function enc(S) {
+  return { t: S.t, d: S.d, s: S.s, w: S.w, n: S.n, on: S.on.join(''), p: S.p.map(a => a.join(',')).join(';'), at: now(), mv: lastSent && lastSent.why ? lastSent.why.c * 4 + lastSent.why.i : -1,
+    sk: !!S.sk, u: (S.u || [0, 0, 0, 0]).map(x => x.toString(16)).join(''), h: (S.h || []).map(x => x.c + '.' + x.i + '.' + x.until).join(';'), o: S.o || 0, x: S.x ? 1 : 0 };
+}
 function dec(st, k, on) {
   if (!st || typeof st.p !== 'string') return null;
   const rows = st.p.split(';').map(r => r.split(',').map(Number));
   if (rows.length !== 4 || rows.some(r => r.length !== 4 || r.some(v => !Number.isInteger(v) || v < -1 || v > END))) return null;
-  return { k, on, p: rows, t: st.t | 0, d: st.d | 0, s: st.s | 0, w: Number.isInteger(st.w) ? st.w : -1, n: st.n | 0, at: st.at || 0, mv: Number.isInteger(st.mv) ? st.mv : -1 };
+  const u = /^[0-9a-f]{4}$/.test(String(st.u)) ? String(st.u).split('').map(x => parseInt(x, 16)) : [0, 0, 0, 0];
+  const h = typeof st.h === 'string' && st.h ? st.h.split(';').map(x => x.split('.').map(Number)).filter(a => a.length === 3 && a.every(Number.isInteger)).map(([c, i, until]) => ({ c, i, until })) : [];
+  return { k, on, p: rows, t: st.t | 0, d: st.d | 0, s: st.s | 0, w: Number.isInteger(st.w) ? st.w : -1, n: st.n | 0, at: st.at || 0, mv: Number.isInteger(st.mv) ? st.mv : -1,
+    sk: !!st.sk, u, h, o: st.o | 0, x: st.x ? 1 : 0 };
 }
 function netLobby(nodes) {
   if (!CFG()) { nodes.push(el('p', '', 'Онлайн ширээ зөвхөн линкээр нээдэг хувилбарт ажиллана.')); return showCard(...nodes); }
@@ -532,15 +670,15 @@ function netLobby(nodes) {
   const list = el('div', 'tables'), ids = Object.keys(tables).filter(id => tables[id] && tables[id].by).sort((a, b) => (tables[b].at || 0) - (tables[a].at || 0));
   for (const id of ids.slice(0, 12)) list.append(tableBox(id, tables[id]));
   if (!ids.length) list.append(el('p', 'note', 'Одоогоор ширээ алга. Шинээр нээгээрэй.'));
-  const r = el('div', 'row');
+  const r = el('div', 'row'), sk = LS.get('ludoSk', true) !== false;
   r.append(btn('Ширээ нээх (4 бөмбөг)', 'btn', () => createTable(4)), btn('Хурдан (2 бөмбөг)', 'btn ghost', () => createTable(2)));
-  nodes.push(r, list, rulesNote());
+  nodes.push(el('div', 'sub', 'Шинэ ширээ: ур чадварын карт'), seg([['🃏 Карттай', true], ['Энгийн', false]], sk, v => LS.set('ludoSk', v)), r, list, rulesNote());
   showCard(...nodes);
 }
 function tableBox(id, t) {
   const box = el('div', 'tbl'), started = !!(t.st && typeof t.st.p === 'string');
   const names = [0, 1, 2, 3].map(c => t.seats && t.seats[c]);
-  const hd = el('div', 'hd'); hd.append(el('b', '', 'Ширээ · ' + (t.k === 2 ? '2 бөмбөг' : '4 бөмбөг')), el('span', '', started ? (t.st.w >= 0 ? 'Дууссан' : 'Тоглож байна') : 'Хүлээж байна'));
+  const hd = el('div', 'hd'); hd.append(el('b', '', 'Ширээ · ' + (t.k === 2 ? '2 бөмбөг' : '4 бөмбөг') + (t.sk ? ' · 🃏' : '')), el('span', '', started ? (t.st.w >= 0 ? 'Дууссан' : 'Тоглож байна') : 'Хүлээж байна'));
   const grid = el('div', 'seats');
   names.forEach((s, c) => {
     const free = !s && !started, b = el(free ? 'button' : 'div', 'seat' + (s ? '' : ' free')), dot = el('span', 'dot'); dot.style.background = COL[c].c;
@@ -556,7 +694,7 @@ function tableBox(id, t) {
 async function createTable(k) {
   const id = rid();
   try {
-    await D.set(R(id), { by: uid, at: now(), k, seats: { 0: { u: uid, n: myName } } });
+    await D.set(R(id), { by: uid, at: now(), k, sk: LS.get('ludoSk', true) !== false, seats: { 0: { u: uid, n: myName } } });
     D.onDisconnect(R(id + '/seats/0')).remove().catch(() => {});
     openTable(id);
   } catch { flash('Ширээ нээж чадсангүй.'); }
@@ -595,6 +733,10 @@ function applyTable() {
         log(describe(prev, S, prev.d || '?', mv.c, mv.i, cap, S.p[mv.c][mv.i] === END));
         sfx(cap.length ? 'cap' : 'step');
       } else if (prev && S.d && S.d !== prev.d) sfx('roll');
+      if (prev) for (const c of S.on) {   // a card someone else played
+        const fresh = (S.u[c] || 0) & ~(prev.u ? prev.u[c] || 0 : 0);
+        for (const s of SKILLS) if (fresh & (1 << SK[s.k])) { log(who(c) + ': ' + s.i + ' ' + s.n + (s.k === 'reroll' ? ' → ' + S.d : s.k === 'double' ? ' → ' + S.d : '')); sfx('home'); }
+      }
       show(S, mv);
       if (S.t !== (prev && prev.t) && isMine(S.t) && S.w < 0) { sfx('turn'); flash('Таны ээлж!'); }
     }
@@ -606,7 +748,7 @@ function applyTable() {
 function netLobbyCard() {
   const t = table && tables[table.id];
   if (!t) return lobby();
-  const nodes = [el('h2', '', 'Ширээ'), el('p', '', (t.k === 2 ? '2 бөмбөг' : '4 бөмбөг') + ' · ' + (CODE ? 'өрөө ' + CODE : 'нийтийн'))];
+  const nodes = [el('h2', '', 'Ширээ'), el('p', '', (t.k === 2 ? '2 бөмбөг' : '4 бөмбөг') + (t.sk ? ' · 🃏 карттай' : '') + ' · ' + (CODE ? 'өрөө ' + CODE : 'нийтийн'))];
   const grid = el('div', 'seats'), host = t.by === uid;
   [0, 1, 2, 3].forEach(c => {
     const s = t.seats && t.seats[c], d = el('div', 'seat' + (s ? '' : ' free')), dot = el('span', 'dot'); dot.style.background = COL[c].c;
@@ -627,7 +769,7 @@ async function startTable() {
   const t = tables[table.id]; if (!t) return;
   const on = [0, 1, 2, 3].filter(c => t.seats && t.seats[c]);
   if (on.length < 2) return;
-  const S = newGame(on, t.k === 2 ? 2 : 4);
+  const S = newGame(on, t.k === 2 ? 2 : 4, !!t.sk);
   lastSent = null;
   try { await D.set(R(table.id + '/st'), enc(S)); } catch { flash('Эхлүүлж чадсангүй.'); }
 }

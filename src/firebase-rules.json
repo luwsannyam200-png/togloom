@@ -471,6 +471,7 @@
           "by": { ".validate": "newData.isString() && newData.val().length <= 128" },
           "at": { ".validate": "newData.isNumber() && newData.val() <= now + 60000" },
           "k": { ".validate": "newData.val() === 2 || newData.val() === 4" },
+          "sk": { ".validate": "newData.isBoolean()" },
           "seats": {
             "$c": {
               ".write": "auth != null && !data.parent().parent().child('st').exists() && (newData.exists() ? !data.exists() && newData.child('u').val() === auth.uid : data.child('u').val() === auth.uid)",
@@ -484,7 +485,12 @@
             ".write": "auth != null && (data.parent().child('by').val() === auth.uid || data.parent().child('seats/0/u').val() === auth.uid || data.parent().child('seats/1/u').val() === auth.uid || data.parent().child('seats/2/u').val() === auth.uid || data.parent().child('seats/3/u').val() === auth.uid)",
             ".validate": "newData.hasChildren(['t', 'd', 'p', 'n', 'on']) && (!data.exists() || newData.child('n').val() === data.child('n').val() + 1)",
             "t": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
-            "d": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 6" },
+            "d": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 12" },
+            "o": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 6" },
+            "x": { ".validate": "newData.val() === 0 || newData.val() === 1" },
+            "sk": { ".validate": "newData.isBoolean()" },
+            "u": { ".validate": "newData.isString() && newData.val().matches(/^[0-9a-f]{4}$/)" },
+            "h": { ".validate": "newData.isString() && newData.val().length <= 200 && newData.val().matches(/^([0-3]\\.[0-3]\\.[0-9]{1,6}(;[0-3]\\.[0-3]\\.[0-9]{1,6})*)?$/)" },
             "s": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
             "w": { ".validate": "newData.isNumber() && newData.val() >= -1 && newData.val() <= 3" },
             "n": { ".validate": "newData.isNumber() && newData.val() >= 0" },

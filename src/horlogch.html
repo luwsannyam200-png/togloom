@@ -77,6 +77,13 @@ button.pp.mine{border-color:var(--accent);background:var(--accent-soft)}
 .wires button{height:44px;border-radius:10px;border:3px solid transparent}
 .wires button.sel{border-color:#fff}
 .wires button.ok{opacity:.35}
+.slider{position:relative;height:44px;border-radius:12px;background:var(--sunk);overflow:hidden}
+.slider i{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--good) 55%,transparent);border-left:2px solid var(--good);border-right:2px solid var(--good)}
+.slider input{position:absolute;inset:0;width:100%;height:100%;margin:0;background:transparent;accent-color:var(--accent);padding:0;border:0}
+.swipe{position:relative;height:64px;border-radius:12px;background:repeating-linear-gradient(90deg,var(--sunk) 0 18px,#141B23 18px 20px);border:1px solid var(--line);touch-action:none}
+.swipe span{position:absolute;left:0;top:6px;width:72px;height:50px;display:grid;place-items:center;font-size:34px;background:#F2D2B0;border-radius:8px;cursor:grab;touch-action:none;user-select:none}
+.aim{position:relative;height:190px;border-radius:12px;background:radial-gradient(circle at 50% 40%,#3A3026,#1C1712);overflow:hidden}
+.aim button{position:absolute;width:52px;height:52px;border:0;background:none;font-size:38px;line-height:1;transform:translate(-26px,-26px);transition:left .12s,top .12s}
 </style>
 </head>
 <body>
@@ -152,6 +159,19 @@ const ST = [   // task stations: hold = press and hold, seq = numbers in order, 
   { n: 'Генератор асаах', k: 'hold', x: 150, y: 680 }, { n: 'Утас холбох', k: 'wire', x: 355, y: 820 },
   { n: 'Сав тоолох', k: 'seq', x: 690, y: 860 }, { n: 'Ачаа бүртгэх', k: 'seq', x: 915, y: 690 },
   { n: 'Камер тохируулах', k: 'seq', x: 1250, y: 670 }, { n: 'Утас холбох', k: 'wire', x: 1455, y: 820 },
+  // 12–20: stations of the longer jobs (pick = short hold, slider = set the level into the green, swipe = steady card swipe, aim = hit the rocks)
+  { n: 'Түлшний сав авах', k: 'pick', x: 800, y: 860 }, { n: 'Генераторт түлш хийх', k: 'hold', x: 255, y: 700 },
+  { n: 'Сэлбэг авах', k: 'pick', x: 1345, y: 125 }, { n: 'Сэлбэг суулгах', k: 'slider', x: 1345, y: 820 },
+  { n: 'Хогийн уут авах', k: 'pick', x: 255, y: 255 }, { n: 'Хогоо хаях', k: 'hold', x: 695, y: 700 },
+  { n: 'Нэвтрэх карт уншуулах', k: 'swipe', x: 330, y: 125 }, { n: 'Даралт тохируулах', k: 'slider', x: 1235, y: 280 },
+  { n: 'Чулуу цохих', k: 'aim', x: 870, y: 105 },
+];
+// jobs dealt to players (role.t lists their numbers): one station, a carry from room to room, or a round through rooms
+const JOBS = [
+  ...ST.slice(0, 12).map((s, i) => ({ n: s.n, steps: [i] })),
+  { n: 'Түлш зөөх', steps: [12, 13] }, { n: 'Сэлбэг хүргэх', steps: [14, 15] }, { n: 'Хог зөөх', steps: [16, 17] },
+  { n: 'Нэвтрэх карт уншуулах', steps: [18] }, { n: 'Даралт тохируулах', steps: [19] }, { n: 'Чулуу цохих', steps: [20] },
+  { n: 'Шалгалтын тойрог', rooms: [1, 3, 5] }, { n: 'Аюулгүй байдлын тойрог', rooms: [2, 4, 0] },
 ];
 const BELL = { x: 800, y: 190 };   // the emergency button in the canteen
 const COLORS = ['#D93B3B', '#2F6FE0', '#2FA35B', '#E55FA8', '#F08A24', '#EAD03A', '#4A5560', '#E8ECEF', '#8A52D6', '#8A5A33', '#3CC9D6', '#9BE04A'];
@@ -228,13 +248,16 @@ const P = p => D.ref(rdb, 'imp/' + M + '/' + p);
 const me = { x: 800, y: 260, f: 1, c: LS.get('impColor', Math.floor(Math.random() * 12)), moving: false };
 let meta = null, players = new Map(), role = null, deadMap = {}, doneMap = {}, kills = [], votes = {}, chat = [];
 let tasksDone = new Set(), killReady = 0, bellUsed = false, roundSeen = '', meetSeen = '', endSeen = '';
+let jobStep = {}, jobSeen = {};   // job -> step reached; job -> rooms already walked through
 const inRound = () => meta && meta.round && meta.phase !== 'lobby' && String(meta.ps || '').split(',').includes(uid);
 const alive = id => !deadMap[id];
 const amHost = () => meta && meta.by === uid;
 const nameOf = id => (id === uid ? myName || 'Та' : (players.get(id) && players.get(id).n) || 'Тоглогч');
 const colOf = id => COLORS[(id === uid ? me.c : players.get(id) && players.get(id).c) | 0] || '#888';
 const roundPs = () => String((meta && meta.ps) || '').split(',').filter(Boolean);
-const myTasks = () => (role && role.t ? String(role.t).split(',').map(Number).filter(i => ST[i]) : []);
+const myTasks = () => (role && role.t ? String(role.t).split(',').map(Number).filter(j => JOBS[j]) : []);
+const curStation = j => (JOBS[j].steps ? JOBS[j].steps[jobStep[j] || 0] : -1);
+const roomAt = (x, y) => ROOMS.findIndex(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
 
 /* ---------- input: keys or a thumb stick on the left half of the screen ---------- */
 const keys = {};
@@ -275,7 +298,8 @@ function frame(t) {
     if (mx) me.f = mx > 0 ? 1 : -1;
     me.moving = true;
   }
-  if (openTask && Math.hypot(me.x - ST[openTask.i].x, me.y - ST[openTask.i].y) > USE + 30) closeTask();
+  if (openTask && Math.hypot(me.x - ST[openTask.st].x, me.y - ST[openTask.st].y) > USE + 30) closeTask();
+  walkRounds();
   publish(t);
   hostTick();
   draw(t, ghost);
@@ -297,9 +321,12 @@ function draw(t, ghost) {
   const vis = ghost || !inRound() ? 1e9 : role && role.r === 'imp' ? VIS_IMP : VIS;
   const seen = q => Math.hypot(q.x - me.x, q.y - me.y) < vis + 20;
   // my stations glow
-  if (inRound() && role && meta.phase === 'play') for (const i of myTasks()) if (!tasksDone.has(i)) {
-    const s = ST[i], a = 0.45 + 0.35 * Math.sin(t / 250);
-    c.strokeStyle = `rgba(255,226,122,${a})`; c.lineWidth = 4; c.strokeRect(s.x - 20, s.y - 20, 40, 40);
+  if (inRound() && role && meta.phase === 'play') for (const j of myTasks()) if (!tasksDone.has(j)) {
+    const a = 0.45 + 0.35 * Math.sin(t / 250);
+    if (JOBS[j].steps) { const s = ST[curStation(j)]; c.strokeStyle = `rgba(255,226,122,${a})`; c.lineWidth = 4; c.strokeRect(s.x - 20, s.y - 20, 40, 40); }
+    else for (const ri of JOBS[j].rooms) if (!(jobSeen[j] && jobSeen[j].has(ri))) {   // rooms still to walk through: a dashed outline
+      const r = ROOMS[ri]; c.save(); c.setLineDash([14, 10]); c.strokeStyle = `rgba(127,196,255,${a * 0.8})`; c.lineWidth = 4; c.strokeRect(r.x + 6, r.y + 6, r.w - 12, r.h - 12); c.restore();
+    }
   }
   // bodies since the last meeting
   for (const k of kills) if (seen(k) && k.at >= ((meta && meta.clean) || 0)) drawMiner(c, k, colOf(k.v), false, true);
@@ -341,11 +368,28 @@ setInterval(() => {
 }, 33);
 
 /* ---------- actions near me ---------- */
-function nearStation() {
+function nearStation() {   // -> the job whose next station is within reach, or -1
   if (!inRound() || meta.phase !== 'play') return -1;
   let best = -1, bd = USE;
-  for (const i of myTasks()) { if (tasksDone.has(i)) continue; const d = Math.hypot(me.x - ST[i].x, me.y - ST[i].y); if (d < bd) { bd = d; best = i; } }
+  for (const j of myTasks()) {
+    if (tasksDone.has(j) || !JOBS[j].steps) continue;
+    const s = ST[curStation(j)], d = Math.hypot(me.x - s.x, me.y - s.y); if (d < bd) { bd = d; best = j; }
+  }
   return best;
+}
+// rounds through rooms count by walking in; a ghost may finish them too
+function walkRounds() {
+  if (!inRound() || !role || meta.phase !== 'play') return;
+  const here = roomAt(me.x, me.y); if (here < 0) return;
+  for (const j of myTasks()) {
+    const job = JOBS[j];
+    if (tasksDone.has(j) || !job.rooms || !job.rooms.includes(here)) continue;
+    const seen = jobSeen[j] || (jobSeen[j] = new Set());
+    if (seen.has(here)) continue;
+    seen.add(here);
+    if (seen.size >= job.rooms.length) taskDone(j);
+    else { sfx('step'); toast('«' + job.n + '»: ' + ROOMS[here].n + ' ✓ (' + seen.size + '/' + job.rooms.length + ')', 1800); paintTasks(); }
+  }
 }
 const nearBell = () => inRound() && meta.phase === 'play' && alive(uid) && Math.hypot(me.x - BELL.x, me.y - BELL.y) < 70;
 function nearBody() {
@@ -395,18 +439,28 @@ const ov = $('#ov'), card = $('#card');
 function showCard(clear, ...nodes) { card.replaceChildren(...nodes); delete card.dataset.splash; ov.hidden = false; ov.classList.toggle('clear', !!clear); }
 function hideCard() { ov.hidden = true; }
 function closeTask() { openTask = null; hideCard(); }
-function taskDone(i) {
-  tasksDone.add(i); sfx('ok'); closeTask(); paintTasks();
+function taskDone(j) {
+  tasksDone.add(j); sfx('ok'); closeTask(); paintTasks();
   if (role && role.r === 'crew' && net) D.set(P('done/' + meta.round + '/' + uid), tasksDone.size).catch(() => {});
-  toast('«' + ST[i].n + '» хийгдлээ');
+  toast('«' + JOBS[j].n + '» хийгдлээ');
 }
-function openTaskCard(i) {
-  const s = ST[i]; openTask = { i };
-  const nodes = [el('h2', '', s.n)];
-  if (s.k === 'hold') {
-    const b = el('button', 'hold'), bar = el('i'); b.type = 'button'; b.append(bar, el('span', '', 'Дараад барь'));
+function stepDone(j) {   // one station of a job is done: the job is done, or the next station waits in another room
+  const job = JOBS[j], at = jobStep[j] || 0;
+  if (at + 1 >= job.steps.length) return taskDone(j);
+  jobStep[j] = at + 1; sfx('ok'); closeTask(); paintTasks();
+  const next = ST[job.steps[at + 1]];
+  toast('«' + job.n + '»: ' + ST[job.steps[at]].n + ' ✓ → ' + roomOf(next) + ': ' + next.n, 3200);
+}
+function openTaskCard(j) {
+  const st = curStation(j), s = ST[st], done = () => stepDone(j);
+  openTask = { j, st };
+  const job = JOBS[j], nodes = [el('h2', '', s.n)];
+  if (job.steps.length > 1) nodes.push(el('p', '', '«' + job.n + '» · ' + ((jobStep[j] || 0) + 1) + '/' + job.steps.length + '-р алхам'));
+  if (s.k === 'hold' || s.k === 'pick') {
+    const ms = s.k === 'pick' ? 900 : 2600;
+    const b = el('button', 'hold'), bar = el('i'); b.type = 'button'; b.append(bar, el('span', '', s.k === 'pick' ? 'Дараад ав' : 'Дараад барь'));
     let t0 = 0, raf = 0;
-    const step = () => { const p = Math.min(1, (performance.now() - t0) / 2600); bar.style.width = p * 100 + '%'; if (p >= 1) { taskDone(i); return; } raf = requestAnimationFrame(step); };
+    const step = () => { const p = Math.min(1, (performance.now() - t0) / ms); bar.style.width = p * 100 + '%'; if (p >= 1) { done(); return; } raf = requestAnimationFrame(step); };
     b.addEventListener('pointerdown', e => { e.preventDefault(); t0 = performance.now(); cancelAnimationFrame(raf); raf = requestAnimationFrame(step); });
     const stop = () => { cancelAnimationFrame(raf); bar.style.width = '0'; };
     b.addEventListener('pointerup', stop); b.addEventListener('pointerleave', stop); b.addEventListener('pointercancel', stop);
@@ -414,23 +468,68 @@ function openTaskCard(i) {
   } else if (s.k === 'seq') {
     const g = el('div', 'seq'); let next = 1;
     for (const n of shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9])) {
-      const b = btn(String(n), '', () => { if (n !== next) { next = 1; for (const x of g.children) x.classList.remove('ok'); sfx('lose'); return; } b.classList.add('ok'); next++; sfx('step'); if (next > 9) taskDone(i); });
+      const b = btn(String(n), '', () => { if (n !== next) { next = 1; for (const x of g.children) x.classList.remove('ok'); sfx('lose'); return; } b.classList.add('ok'); next++; sfx('step'); if (next > 9) done(); });
       g.append(b);
     }
     nodes.push(g, el('p', '', '1-ээс 9 хүртэл дарааллаар нь товш.'));
-  } else {
+  } else if (s.k === 'wire') {
     const W4 = [0, 1, 2, 5], left = shuffle(W4.slice()), right = shuffle(W4.slice()), g = el('div', 'wires'); let sel = null, ok = 0;
     const L = left.map(c => { const b = btn('', '', () => { if (b.classList.contains('ok')) return; for (const x of L) x.classList.remove('sel'); b.classList.add('sel'); sel = { c, b }; }); b.style.background = COLORS[c]; return b; });
-    const Rr = right.map(c => { const b = btn('', '', () => { if (!sel || b.classList.contains('ok')) return; if (sel.c === c) { b.classList.add('ok'); sel.b.classList.add('ok'); sel.b.classList.remove('sel'); sel = null; ok++; sfx('step'); if (ok === 4) taskDone(i); } else { sel.b.classList.remove('sel'); sel = null; sfx('lose'); } }); b.style.background = COLORS[c]; return b; });
+    const Rr = right.map(c => { const b = btn('', '', () => { if (!sel || b.classList.contains('ok')) return; if (sel.c === c) { b.classList.add('ok'); sel.b.classList.add('ok'); sel.b.classList.remove('sel'); sel = null; ok++; sfx('step'); if (ok === 4) done(); } else { sel.b.classList.remove('sel'); sel = null; sfx('lose'); } }); b.style.background = COLORS[c]; return b; });
     for (let k = 0; k < 4; k++) g.append(L[k], Rr[k]);
     nodes.push(g, el('p', '', 'Зүүн талын утсыг ижил өнгөтэй баруун талынхтай нь холбо.'));
+  } else if (s.k === 'slider') {
+    // three times: let the handle go inside the green band
+    const wrap = el('div', 'slider'), band = el('i'), inp = el('input'), cnt = el('p', '', '0 / 3');
+    inp.type = 'range'; inp.min = 0; inp.max = 100; inp.value = 0;
+    let ok = 0, lo = 0;
+    const place = () => { lo = 15 + Math.floor(Math.random() * 65); band.style.left = lo + '%'; band.style.width = '12%'; inp.value = 0; };
+    inp.addEventListener('change', () => {
+      const v = +inp.value;
+      if (v >= lo && v <= lo + 12) { ok++; sfx('step'); cnt.textContent = ok + ' / 3'; if (ok >= 3) return done(); place(); }
+      else { sfx('lose'); inp.value = 0; }
+    });
+    wrap.append(band, inp); place();
+    nodes.push(wrap, cnt, el('p', '', 'Гулсуурыг ногоон хэсэгт аваачаад тавь. Гурван удаа.'));
+  } else if (s.k === 'swipe') {
+    // drag the card through the reader at an even pace: not too fast, not too slow
+    const slot = el('div', 'swipe'), cardEl = el('span', '', '💳'), msg = el('p', '', 'Картаа зүүнээс баруун тийш тогтуун чирээрэй.');
+    slot.append(cardEl);
+    let x0 = 0, t0 = 0, drag = false;
+    const W = () => slot.clientWidth - cardEl.offsetWidth;
+    cardEl.addEventListener('pointerdown', e => { e.preventDefault(); drag = true; x0 = e.clientX - cardEl.offsetLeft; t0 = performance.now(); cardEl.setPointerCapture(e.pointerId); });
+    cardEl.addEventListener('pointermove', e => { if (drag) cardEl.style.left = Math.max(0, Math.min(W(), e.clientX - x0)) + 'px'; });
+    const up = () => {
+      if (!drag) return; drag = false;
+      const end = cardEl.offsetLeft >= W() - 4, dt = performance.now() - t0;
+      if (end && dt >= 450 && dt <= 1500) return done();
+      msg.textContent = !end ? 'Төгсгөл хүртэл нь чирээрэй.' : dt < 450 ? 'Хэт хурдан! Дахин оролдоорой.' : 'Хэт удаан! Дахин оролдоорой.';
+      sfx('lose'); cardEl.style.left = '0px';
+    };
+    cardEl.addEventListener('pointerup', up); cardEl.addEventListener('pointercancel', up);
+    nodes.push(slot, msg);
+  } else {
+    // aim: tap the rock before it jumps elsewhere, five times
+    const pit = el('div', 'aim'), rock = el('button', '', '🪨'), cnt = el('p', '', '0 / 5');
+    rock.type = 'button'; pit.append(rock);
+    let hits = 0, timer = 0;
+    const jump = () => { rock.style.left = (5 + Math.random() * 80) + '%'; rock.style.top = (5 + Math.random() * 75) + '%'; };
+    rock.onclick = () => { hits++; sfx('step'); cnt.textContent = hits + ' / 5'; if (hits >= 5) { clearInterval(timer); return done(); } jump(); };
+    jump(); timer = setInterval(() => { if (!openTask || openTask.j !== j) return clearInterval(timer); jump(); }, 1000);
+    nodes.push(pit, cnt, el('p', '', 'Чулуу өөр газар үсрэхээс өмнө товш.'));
   }
   nodes.push(el('div', 'row')); nodes[nodes.length - 1].append(btn('Хаах', 'btn ghost', closeTask));
   showCard(true, ...nodes);
 }
 function paintTasks() {
   const box = $('#tasks'); box.replaceChildren();
-  for (const i of myTasks()) box.append(el('div', 'task' + (tasksDone.has(i) ? ' ok' : ''), ST[i].n + ' · ' + roomOf(ST[i])));
+  for (const j of myTasks()) {
+    const job = JOBS[j], ok = tasksDone.has(j);
+    let text = job.n;
+    if (job.rooms) text += ': ' + job.rooms.map(ri => ROOMS[ri].n + (jobSeen[j] && jobSeen[j].has(ri) ? ' ✓' : '')).join(', ');
+    else { const s = ST[curStation(j)]; text += (job.steps.length > 1 && !ok ? ' (' + ((jobStep[j] || 0) + 1) + '/' + job.steps.length + ')' : '') + ' · ' + roomOf(s); }
+    box.append(el('div', 'task' + (ok ? ' ok' : ''), text));
+  }
   const ps = roundPs(), crew = Math.max(1, ps.length - ((meta && meta.ni) | 0)), total = crew * TASKS;
   const done = Object.entries(doneMap).reduce((a, [, v]) => a + Math.min(TASKS, Number(v) || 0), 0);
   $('#prog').style.width = Math.min(100, (done / total) * 100) + '%';
@@ -481,7 +580,7 @@ async function startRound() {
     if (old) for (const k of ['kill', 'dead', 'done', 'call', 'vote', 'chat', 'role']) await D.remove(P(k + '/' + old)).catch(() => {});
     roleCache[round] = {};
     for (const id of ps) {
-      const tasks = shuffle(ST.map((_, i) => i)).slice(0, TASKS).join(','), imp = imps.includes(id);
+      const tasks = shuffle(JOBS.map((_, j) => j)).slice(0, TASKS).join(','), imp = imps.includes(id);
       roleCache[round][id] = imp ? 'imp' : 'crew';
       await D.set(P('role/' + round + '/' + id), imp ? { r: 'imp', m: imps.join(','), t: tasks } : { r: 'crew', m: '', t: tasks });
     }
@@ -613,7 +712,7 @@ let subs = [];
 function watchRound(round) {
   for (const off of subs) off(); subs = [];
   deadMap = {}; doneMap = {}; kills = []; votes = {}; chat = []; calls = [];
-  tasksDone = new Set(); bellUsed = false; role = null; myVote = '';
+  tasksDone = new Set(); jobStep = {}; jobSeen = {}; bellUsed = false; role = null; myVote = '';
   if (!round) return;
   subs.push(D.onValue(P('dead/' + round), s => { deadMap = s.val() || {}; onDead(); }, () => {}));
   subs.push(D.onValue(P('done/' + round), s => { doneMap = s.val() || {}; paintTasks(); }, () => {}));
