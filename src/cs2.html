@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>CS2 академи · Цайны цаг</title>
+<meta name="description" content="CS2-ын мэдлэгээ шалгах асуулт, газрын зургаар байрлал таах, utility lineup сурах, нэмэх хэсэг.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23E8780A'/%3E%3Ccircle cx='32' cy='32' r='15' fill='%23B9C4CF'/%3E%3Ccircle cx='26' cy='28' r='9' fill='%23E6ECF2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@700;800&display=swap">
+<style>
+/* Layout: top bar with four tabs; each tab is one column on phones and map + side panel on wide screens. Dark "match" look. */
+:root{--bg:#10151C;--surface:#18202A;--sunk:#0C1117;--ink:#E6ECF2;--muted:#94A2B1;--line:#2A3440;--accent:#FF9426;--accent-ink:#1C1004;--good:#3CC57A;--bad:#F06868;--warn:#E0B020;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 "Golos Text","Segoe UI",system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer}
+[hidden]{display:none!important}
+a{color:var(--accent)}
+.wrap{max-width:1100px;margin:0 auto;padding:14px max(16px,env(safe-area-inset-left)) 48px max(16px,env(safe-area-inset-right))}
+.top{display:flex;align-items:center;gap:12px 16px;flex-wrap:wrap;margin-bottom:16px}
+.top h1{font-family:Unbounded,sans-serif;font-size:clamp(22px,4.6vw,32px);margin:0;flex:1 1 auto;letter-spacing:-.01em}
+.top h1 b{color:var(--accent)}
+.back{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 14px;font-weight:600;text-decoration:none;color:var(--ink)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;width:100%}
+.tabs button,.seg button{border:1px solid var(--line);background:transparent;border-radius:999px;padding:7px 14px;font-size:14px}
+.tabs button[aria-pressed="true"],.seg button[aria-pressed="true"]{background:var(--ink);color:#17202B;border-color:var(--ink)}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:820px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.panel h2{font-family:Unbounded,sans-serif;font-size:17px;margin:0}
+.panel h3{margin:4px 0 0;font-size:15px}
+.note{font-size:13px;color:var(--muted);margin:0}
+.btn{border:0;border-radius:12px;padding:10px 16px;font-weight:700;background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,textarea,select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--sunk);color:var(--ink);font:inherit}
+textarea{resize:vertical}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.map{width:100%;aspect-ratio:1;display:block;border-radius:14px;background:#141B23;border:1px solid var(--line);touch-action:manipulation;user-select:none}
+.map.pick{cursor:crosshair}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:999px;padding:2px 9px}
+.badge.no{background:rgba(224,176,32,.18);color:var(--warn)}
+.badge.ok{background:rgba(60,197,122,.18);color:var(--good)}
+.list{display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto}
+.item{display:flex;align-items:center;gap:8px;text-align:left;border:1px solid var(--line);background:transparent;border-radius:10px;padding:8px 10px}
+.item[aria-pressed="true"]{border-color:var(--accent);background:rgba(255,148,38,.08)}
+.item .nm{flex:1;min-width:0;font-weight:600}
+.item small{display:block;color:var(--muted);font-weight:500}
+.dot{width:12px;height:12px;border-radius:50%;flex:none}
+.q{font-family:Unbounded,sans-serif;font-size:clamp(17px,3vw,22px);line-height:1.35;margin:0}
+.opts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (max-width:520px){.opts{grid-template-columns:minmax(0,1fr)}}
+.opt{text-align:left;border:1px solid var(--line);background:var(--sunk);border-radius:12px;padding:12px;font-weight:600;min-height:54px}
+.opt:hover:not(:disabled){border-color:var(--accent)}
+.opt.right{border-color:var(--good);background:rgba(60,197,122,.14)}
+.opt.wrong{border-color:var(--bad);background:rgba(240,104,104,.12)}
+.timer{height:7px;border-radius:9px;background:var(--sunk);overflow:hidden}
+.timer i{display:block;height:100%;background:var(--accent);transform-origin:left}
+.meta{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}
+.big{font-family:Unbounded,sans-serif;font-size:34px;font-weight:800;color:var(--accent)}
+.qimg{max-width:100%;max-height:260px;border-radius:10px;border:1px solid var(--line);object-fit:contain;background:var(--sunk)}
+.status{min-height:22px;font-weight:600}
+.status.good{color:var(--good)} .status.bad{color:var(--bad)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:14px}
+.kv b{color:var(--muted);font-weight:600}
+.optrow{display:flex;align-items:center;gap:8px}
+.optrow input[type=radio]{width:22px;height:22px;flex:none;accent-color:var(--good)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="index.html">← Цэс</a>
+    <h1>CS2 <b>академи</b></h1>
+    <nav class="tabs" id="tabs" aria-label="Хэсгүүд">
+      <button type="button" data-tab="quiz">Асуулт</button>
+      <button type="button" data-tab="guess">Зургаар таах</button>
+      <button type="button" data-tab="util">Utility</button>
+      <button type="button" data-tab="add">Нэмэх</button>
+    </nav>
+  </header>
+  <main id="main"></main>
+</div>
+
+<script src="firebase-config.js"></script>
+<script type="module">
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+const btn = (label, cls, fn) => { const b = el('button', cls, label); b.type = 'button'; b.onclick = fn; return b; };
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('tsai:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('tsai:' + k, JSON.stringify(v)); } catch {} },
+};
+const rid = () => (Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10)).slice(0, 14);
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const SVGNS = 'http://www.w3.org/2000/svg';
+const sv = (t, attrs) => { const e = document.createElementNS(SVGNS, t); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+const myName = String(LS.get('nick', '') || '').trim().slice(0, 24);
+const seg = (items, cur, set) => {
+  const s = el('div', 'seg');
+  for (const [t, v] of items) { const b = btn(t, '', () => set(v)); b.setAttribute('aria-pressed', String(v === cur)); s.append(b); }
+  return s;
+};
+
+/* ---------- Firebase (same project and anonymous user as the hub) ---------- */
+const CFG = window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.databaseURL ? window.FIREBASE_CONFIG : null;
+const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
+let D = null, rdb = null, uid = null, admin = false, offset = 0;
+const R = p => D.ref(rdb, p);
+const now = () => Date.now() + offset;
+let userQs = [], userLu = [];
+// opened from a room (#r=CODE): a running «CS2 сорил» contest there takes this page's quiz scores
+const CODE = ((location.hash.match(/r=([A-Za-z0-9]{4,6})/) || [])[1] || '').toUpperCase();
+let room = null, roomBase = '';
+const contest = () => room && room.game === 'cs2' && room.round && now() < room.ends;
+if (CODE) document.querySelector('.back').href = 'index.html#r=' + CODE;
+async function connect() {
+  const [A, U, Dm] = await Promise.all(['app', 'auth', 'database'].map(m => import(SDK + 'firebase-' + m + '.js')));
+  const app = A.initializeApp(CFG), cred = await U.signInAnonymously(U.getAuth(app));
+  D = Dm; rdb = D.getDatabase(app); uid = cred.user.uid;
+  D.onValue(R('.info/serverTimeOffset'), s => { offset = Number(s.val()) || 0; }, () => {});
+  if (CODE) for (const b of ['arena/', 'openarena/']) {
+    // never redraw a question in progress
+    try { if ((await D.get(R(b + CODE + '/by'))).exists()) { roomBase = b + CODE; D.onValue(R(roomBase), s => { room = s.val(); if (tab === 'quiz' && !qs) render(); }, () => {}); break; } } catch {}
+  }
+  D.onValue(R('cs2/q'), s => { userQs = []; s.forEach(c => { const v = c.val(); if (v && typeof v.q === 'string' && Array.isArray(v.o)) userQs.push({ ...v, id: c.key }); }); refresh(); }, () => {});
+  D.onValue(R('cs2/lu'), s => { userLu = []; s.forEach(c => { const v = c.val(); if (v && MAPS[v.map]) userLu.push({ ...v, id: c.key, db: true }); }); refresh(); }, () => {});
+  // the board admin of «Хэлэх үг» (noteadmins/<uid>) also confirms lineups here
+  try { admin = (await D.get(R('noteadmins/' + uid))).exists(); } catch {}
+  refresh();
+}
+
+/* ---------- map sketches: our own simplified radar-style drawings (0–100 grid, north up), not Valve images ---------- */
+// zone: [name, x, y, w, h, kind]  kind: s = bomb site, p = spawn, w = way / area
+const MAPS = {
+  mirage: { name: 'Mirage', zones: [
+    ['T spawn', 82, 38, 16, 24, 'p'], ['Top mid', 66, 42, 14, 12, 'w'], ['Mid', 46, 40, 20, 14, 'w'], ['Window', 34, 40, 10, 8, 'w'],
+    ['Underpass', 50, 28, 10, 10, 'w'], ['Short', 32, 26, 10, 12, 'w'], ['Apartments', 46, 8, 24, 14, 'w'], ['B site', 12, 6, 24, 18, 's'],
+    ['Market', 8, 28, 16, 10, 'w'], ['Connector', 40, 54, 9, 10, 'w'], ['Jungle', 30, 58, 10, 8, 'w'], ['Stairs', 42, 66, 8, 6, 'w'],
+    ['Ramp', 56, 60, 10, 16, 'w'], ['Palace', 60, 80, 18, 10, 'w'], ['Tetris', 46, 74, 9, 7, 'w'], ['A site', 22, 68, 20, 18, 's'],
+    ['Ticket booth', 12, 66, 9, 8, 'w'], ['CT spawn', 4, 44, 14, 16, 'p'],
+  ] },
+  dust2: { name: 'Dust2', zones: [
+    ['T spawn', 36, 84, 28, 13, 'p'], ['Outside long', 66, 64, 14, 14, 'w'], ['Long doors', 78, 52, 9, 8, 'w'], ['Long A', 80, 24, 12, 28, 'w'],
+    ['Pit', 92, 10, 7, 14, 'w'], ['A site', 62, 8, 24, 15, 's'], ['Short A', 56, 24, 10, 14, 'w'], ['Xbox', 47, 26, 8, 7, 'w'],
+    ['Mid', 44, 34, 12, 32, 'w'], ['Mid doors', 42, 18, 12, 6, 'w'], ['CT spawn', 40, 4, 18, 12, 'p'], ['Outside tunnels', 22, 70, 14, 12, 'w'],
+    ['Upper tunnels', 12, 44, 13, 24, 'w'], ['Lower tunnels', 27, 40, 15, 8, 'w'], ['B site', 6, 8, 24, 22, 's'], ['B window', 31, 10, 7, 9, 'w'],
+  ] },
+  inferno: { name: 'Inferno', zones: [
+    ['T spawn', 4, 80, 18, 16, 'p'], ['Second mid', 22, 62, 12, 10, 'w'], ['Banana', 30, 32, 10, 36, 'w'], ['Car', 41, 26, 8, 8, 'w'],
+    ['B site', 30, 6, 26, 18, 's'], ['Coffins', 58, 8, 9, 8, 'w'], ['Construction', 52, 24, 11, 8, 'w'], ['CT spawn', 74, 8, 20, 14, 'p'],
+    ['Arch', 66, 28, 11, 10, 'w'], ['Library', 80, 30, 13, 10, 'w'], ['A site', 70, 44, 22, 15, 's'], ['Pit', 88, 62, 10, 14, 'w'],
+    ['Graveyard', 75, 61, 10, 8, 'w'], ['Balcony', 62, 60, 10, 8, 'w'], ['Mid', 44, 48, 16, 11, 'w'], ['Apartments', 44, 68, 20, 12, 'w'],
+    ['Boiler', 66, 82, 9, 8, 'w'],
+  ] },
+};
+const ZFILL = { s: '#5A3A1E', p: '#1F3A55', w: '#2A3542' };
+const UT = { smoke: ['Smoke', '#B9C4CF'], flash: ['Flash', '#F2E36B'], molotov: ['Molotov', '#FF7A2E'], he: ['HE', '#F06868'] };
+const HOW = { left: 'Зүүн товч (энгийн)', jump: 'Jump-throw (үсрэнгээ)', run: 'Гүйж байгаад', right: 'Баруун товч (ойр, сул)', both: 'Хоёр товч (дунд)', walk: 'Алхаж байгаад' };
+function drawMap(key, opt = {}) {
+  const m = MAPS[key], svg = sv('svg', { viewBox: '0 0 100 100', class: 'map' + (opt.pick ? ' pick' : ''), role: 'img', 'aria-label': m.name + ' газрын зургийн схем' });
+  svg.append(sv('rect', { x: 0, y: 0, width: 100, height: 100, fill: '#141B23' }));
+  for (const [n, x, y, w, h, k] of m.zones) {
+    const hot = opt.hi === n, dim = opt.hi && !hot;
+    svg.append(sv('rect', { x, y, width: w, height: h, rx: 1.2, fill: hot ? '#FF9426' : ZFILL[k], stroke: hot ? '#FFE0B8' : '#3E4C5D', 'stroke-width': hot ? 0.6 : 0.3, opacity: dim ? 0.55 : 1 }));
+    if (k === 's' && !(opt.hideHi && hot)) { const t = sv('text', { x: x + w / 2, y: y + h / 2 + 3.4, 'text-anchor': 'middle', 'font-size': 10, 'font-weight': 800, fill: 'rgba(255,190,120,.35)', 'font-family': 'Unbounded, sans-serif' }); t.textContent = n[0]; svg.append(t); }
+    if (opt.labels !== false && !(opt.hideHi && hot)) {
+      const t = sv('text', { x: x + w / 2, y: y + (k === 's' ? 3 : h / 2 + 1), 'text-anchor': 'middle', 'font-size': 2.4, fill: hot ? '#1C1004' : '#C9D3DD', 'font-family': 'Golos Text, sans-serif', 'font-weight': 600 });
+      t.textContent = hot && opt.hideHi ? '?' : n; svg.append(t);
+    }
+  }
+  const mark = (x, y, color, r = 1.6) => svg.append(sv('circle', { cx: x, cy: y, r, fill: color, stroke: '#0C1117', 'stroke-width': 0.5 }));
+  for (const lu of opt.lineups || []) {
+    const [, c] = UT[lu.t] || UT.smoke, sel = opt.sel === lu.id;
+    if (sel) svg.append(sv('line', { x1: lu.sx, y1: lu.sy, x2: lu.lx, y2: lu.ly, stroke: c, 'stroke-width': 0.6, 'stroke-dasharray': '1.5 1.2' }));
+    if (sel || opt.showLand) {
+      if (lu.t === 'smoke') svg.append(sv('circle', { cx: lu.lx, cy: lu.ly, r: 4.2, fill: 'rgba(185,196,207,.55)', stroke: c, 'stroke-width': 0.4 }));
+      else if (lu.t === 'molotov') svg.append(sv('ellipse', { cx: lu.lx, cy: lu.ly, rx: 4, ry: 2.6, fill: 'rgba(255,122,46,.55)', stroke: c, 'stroke-width': 0.4 }));
+      else if (lu.t === 'flash') svg.append(sv('path', { d: starPath(lu.lx, lu.ly, 3.6, 1.4), fill: 'rgba(242,227,107,.75)' }));
+      else svg.append(sv('circle', { cx: lu.lx, cy: lu.ly, r: 3.4, fill: 'none', stroke: c, 'stroke-width': 0.9 }));
+    }
+    mark(lu.sx, lu.sy, sel ? '#FF9426' : c, sel ? 1.9 : 1.2);
+  }
+  for (const p of opt.points || []) mark(p.x, p.y, p.c, p.r || 1.8);
+  if (opt.pick) svg.addEventListener('click', e => {
+    const r = svg.getBoundingClientRect();
+    opt.pick(Math.round((e.clientX - r.left) / r.width * 1000) / 10, Math.round((e.clientY - r.top) / r.height * 1000) / 10);
+  });
+  return svg;
+}
+function starPath(x, y, R1, R2) {
+  let d = '';
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? R2 : R1; d += (i ? 'L' : 'M') + (x + Math.cos(a) * r).toFixed(2) + ' ' + (y + Math.sin(a) * r).toFixed(2); }
+  return d + 'Z';
+}
+
+/* ---------- built-in questions (facts about the competitive rules and economy) ---------- */
+// [question, right answer, wrong 1, wrong 2, wrong 3]
+const BANK = [
+  ['AK-47 хэдэн доллар вэ?', '$2700', '$2500', '$3100', '$2900'],
+  ['AWP хэдэн доллар вэ?', '$4750', '$5000', '$4500', '$4200'],
+  ['Desert Eagle хэдэн доллар вэ?', '$700', '$500', '$800', '$650'],
+  ['M4A1-S хэдэн доллар вэ?', '$2900', '$3100', '$2700', '$3300'],
+  ['M4A4 хэдэн доллар вэ?', '$3100', '$2900', '$2700', '$3300'],
+  ['Galil AR хэдэн доллар вэ?', '$1800', '$2000', '$1500', '$2100'],
+  ['FAMAS хэдэн доллар вэ?', '$2050', '$1800', '$2250', '$1950'],
+  ['SSG 08 (Scout) хэдэн доллар вэ?', '$1700', '$1500', '$2000', '$1250'],
+  ['Kevlar + Helmet хэдэн доллар вэ?', '$1000', '$650', '$1200', '$800'],
+  ['Defuse kit хэдэн доллар вэ?', '$400', '$200', '$300', '$500'],
+  ['Flashbang хэдэн доллар вэ?', '$200', '$300', '$100', '$250'],
+  ['Smoke grenade хэдэн доллар вэ?', '$300', '$200', '$400', '$250'],
+  ['HE grenade хэдэн доллар вэ?', '$300', '$200', '$400', '$500'],
+  ['Zeus x27 хэдэн доллар вэ?', '$200', '$100', '$300', '$400'],
+  ['Тавьсан бөмбөг хэдэн секундын дараа тэсрэх вэ?', '40 секунд', '35 секунд', '45 секунд', '30 секунд'],
+  ['Defuse kit-гүйгээр бөмбөг задлахад хэр удах вэ?', '10 секунд', '5 секунд', '7 секунд', '12 секунд'],
+  ['Defuse kit-тэй бол бөмбөг задлахад хэр удах вэ?', '5 секунд', '3 секунд', '7 секунд', '4 секунд'],
+  ['Нэг тоглогчийн хамгийн их мөнгө хэд вэ?', '$16,000', '$10,000', '$20,000', '$12,500'],
+  ['CS2 competitive (MR12)-д ялахын тулд хэдэн раунд хожих вэ?', '13', '16', '12', '15'],
+  ['Хутгаар алахад хэдэн доллар авах вэ?', '$1500', '$1000', '$300', '$600'],
+  ['AWP-аар алахад хэдэн доллар авах вэ?', '$100', '$300', '$0', '$200'],
+  ['MP9 гэх мэт ихэнх SMG-ээр алахад хэдэн доллар авах вэ?', '$600', '$300', '$900', '$1500'],
+  ['Ихэнх rifle-аар алахад хэдэн доллар авах вэ?', '$300', '$100', '$600', '$200'],
+  ['Дараалан ялагдахад анхны loss bonus хэд вэ?', '$1400', '$1900', '$1000', '$900'],
+  ['Loss bonus хамгийн ихдээ хэд хүрэх вэ?', '$3400', '$2900', '$3900', '$3000'],
+  ['Т баг бөмбөг тавиад раундаа алдвал багийн гишүүн бүр нэмж хэдэн доллар авах вэ?', '$800', '$300', '$1000', '$500'],
+  ['Бүх өрсөлдөгчийг устгаж ялахад хэдэн доллар авах вэ?', '$3250', '$3500', '$3000', '$2700'],
+  ['Бөмбөг тэсрээд Т баг ялахад хэдэн доллар авах вэ?', '$3500', '$3250', '$3000', '$4000'],
+  ['Overtime эхлэхэд тоглогч бүр хэдэн доллартай эхлэх вэ?', '$12,500', '$10,000', '$16,000', '$8,000'],
+  ['Competitive-д нэг баг хэдэн тоглогчтой вэ?', '5', '4', '6', '10'],
+  ['Т талын эхний гар буу аль нь вэ?', 'Glock-18', 'USP-S', 'P250', 'Tec-9'],
+  ['CT талын эхний гар бууны аль нэг нь аль вэ?', 'USP-S', 'Glock-18', 'Tec-9', 'Desert Eagle'],
+  ['Molotov аль талын гранат вэ?', 'Т', 'CT', 'Хоёулаа', 'Аль нь ч биш'],
+  ['CT талын шатаадаг гранатыг юу гэдэг вэ?', 'Incendiary', 'Molotov', 'Decoy', 'HE'],
+  ['Mirage-д Т талаас B site руу явах гол зам аль нь вэ?', 'Apartments', 'Palace', 'Ramp', 'Jungle'],
+  ['Mirage-д A site руу Т талаас ордог хоёр зам аль нь вэ?', 'Palace ба Ramp', 'Short ба Market', 'Apartments ба Underpass', 'Window ба Connector'],
+  ['Dust2-т A site руу хүрэх урт замыг юу гэдэг вэ?', 'Long A', 'Banana', 'Palace', 'Apartments'],
+  ['Dust2-ын mid-ийн дээд хэсэгт байдаг том хайрцгийг юу гэдэг вэ?', 'Xbox', 'Tetris', 'Firebox', 'Coffins'],
+  ['Inferno-д Т талаас B site руу явах гол зам аль нь вэ?', 'Banana', 'Long A', 'Apartments', 'Palace'],
+  ['Inferno-ийн A site-ын хажуу дахь нүхэн байрлалыг юу гэдэг вэ?', 'Pit', 'Car', 'Xbox', 'Window'],
+];
+
+/* ---------- well-known lineups: rough positions on our sketches, NOT verified — the team checks and fixes them ---------- */
+const SEED = [
+  { id: 'm-window', map: 'mirage', t: 'smoke', n: 'Window smoke', sx: 90, sy: 46, lx: 38, ly: 44, how: 'jump', aim: '' },
+  { id: 'm-jungle', map: 'mirage', t: 'smoke', n: 'Jungle smoke', sx: 64, sy: 70, lx: 35, ly: 62, how: 'left', aim: '' },
+  { id: 'm-ct', map: 'mirage', t: 'smoke', n: 'CT smoke (A)', sx: 62, sy: 78, lx: 16, ly: 70, how: 'jump', aim: '' },
+  { id: 'm-stairs', map: 'mirage', t: 'smoke', n: 'Stairs smoke', sx: 60, sy: 72, lx: 46, ly: 69, how: 'left', aim: '' },
+  { id: 'd-xbox', map: 'dust2', t: 'smoke', n: 'Xbox smoke', sx: 48, sy: 88, lx: 51, ly: 29, how: 'jump', aim: '' },
+  { id: 'd-cross', map: 'dust2', t: 'smoke', n: 'Long cross smoke', sx: 72, sy: 70, lx: 84, ly: 26, how: 'jump', aim: '' },
+  { id: 'd-bdoor', map: 'dust2', t: 'smoke', n: 'B doors smoke', sx: 20, sy: 50, lx: 33, ly: 15, how: 'left', aim: '' },
+  { id: 'i-ct', map: 'inferno', t: 'smoke', n: 'CT smoke (B)', sx: 35, sy: 42, lx: 54, ly: 15, how: 'jump', aim: '' },
+  { id: 'i-coffins', map: 'inferno', t: 'smoke', n: 'Coffins smoke', sx: 35, sy: 46, lx: 62, ly: 12, how: 'left', aim: '' },
+  { id: 'i-arch', map: 'inferno', t: 'smoke', n: 'Arch smoke (A)', sx: 54, sy: 74, lx: 71, ly: 33, how: 'jump', aim: '' },
+];
+const lineups = () => [...SEED.map(x => ({ ...x, seed: true })), ...userLu];
+
+/* ---------- tabs ---------- */
+let tab = CODE ? 'quiz' : LS.get('cs2tab', 'quiz');   // from a room, start on the quiz
+if (!['quiz', 'guess', 'util', 'add'].includes(tab)) tab = 'quiz';
+$('#tabs').onclick = e => { const b = e.target.closest('[data-tab]'); if (!b) return; stopTimers(); tab = b.dataset.tab; LS.set('cs2tab', tab); render(); };
+let timers = [];
+function stopTimers() { for (const t of timers) { clearTimeout(t); cancelAnimationFrame(t); } timers = []; }
+function refresh() { if (tab === 'util' || tab === 'add') render(); }
+function render() {
+  for (const b of document.querySelectorAll('#tabs button')) b.setAttribute('aria-pressed', String(b.dataset.tab === tab));
+  const main = $('#main'); main.replaceChildren();
+  ({ quiz: viewQuiz, guess: viewGuess, util: viewUtil, add: viewAdd })[tab](main);
+}
+
+/* ---------- Асуулт: 10 questions × 20 s, built-in + the team's own ---------- */
+const QMS = 20000;
+const IMG_OK = /^img\/[A-Za-z0-9_\-./]{1,120}\.(png|jpe?g|webp|gif)$/i;
+let qs = null, qi = 0, qpts = 0, qok = 0;
+function viewQuiz(main) {
+  const p = el('div', 'panel');
+  if (contest()) p.append(el('p', 'note', 'Өрөө ' + CODE + ': CS2 сорилын тэмцээн явагдаж байна. Энэ сорилын оноо тань өрөөний жагсаалтад орно.'));
+  if (!qs) {
+    p.append(el('h2', '', 'CS2 асуулт'), el('p', 'note', '10 асуулт, тус бүрт 20 секунд. Зөв бас хурдан хариулбал илүү оноо (500–1000). Багийнхны нэмсэн асуултууд ч холилдоно.'),
+      el('p', 'note', 'Нийт асуулт: ' + BANK.length + ' бэлэн + ' + userQs.length + ' багийнх.'),
+      btn('Эхлэх', 'btn', () => { const all = [...BANK.map(r => ({ q: r[0], o: r.slice(1), k: 0 })), ...userQs]; qs = shuffle(all).slice(0, 10).map(x => { const ord = shuffle(x.o.map((_, i) => i)); return { q: x.q, img: x.img, opts: ord.map(i => x.o[i]), k: ord.indexOf(x.k) }; }); qi = 0; qpts = 0; qok = 0; render(); }));
+    main.append(p); return;
+  }
+  if (qi >= qs.length) {
+    p.append(el('h2', '', 'Үр дүн'), el('div', 'big', qpts + ' оноо'), el('p', '', qs.length + ' асуултаас ' + qok + ' зөв.'));
+    const saved = el('p', 'note', ''); p.append(saved);
+    p.append(el('div', 'row')); p.lastChild.append(btn('Дахин', 'btn', () => { qs = null; render(); }));
+    main.append(p);
+    saveBest(qpts).then(async t => { saved.textContent = t + (await roomSubmit(qpts) ? ' Өрөөний тэмцээнд бүртгэгдлээ.' : ''); });
+    return;
+  }
+  const q = qs[qi], meta = el('div', 'meta'); meta.append(el('span', '', 'Асуулт ' + (qi + 1) + ' / ' + qs.length), el('span', '', qpts + ' оноо'));
+  const bar = el('i'), timer = el('div', 'timer'); timer.append(bar);
+  p.append(meta, timer);
+  // only pictures from this site's own img/ folder: an outside link could be anything, or a pixel that logs viewers
+  if (typeof q.img === 'string' && IMG_OK.test(q.img)) { const im = el('img', 'qimg'); im.src = q.img; im.alt = ''; p.append(im); }
+  p.append(el('p', 'q', q.q));
+  const opts = el('div', 'opts'), status = el('div', 'status');
+  const t0 = performance.now(); let done = false;
+  const pick = j => {
+    if (done) return; done = true; stopTimers();
+    const rem = QMS - (performance.now() - t0);
+    [...opts.children].forEach((b, i) => { b.disabled = true; if (i === q.k) b.classList.add('right'); else if (i === j) b.classList.add('wrong'); });
+    if (j === q.k) { const pts = 500 + Math.round(500 * Math.max(0, rem) / QMS); qpts += pts; qok++; status.textContent = 'Зөв! +' + pts; status.className = 'status good'; }
+    else { status.textContent = j < 0 ? 'Хугацаа дууслаа.' : 'Буруу.'; status.className = 'status bad'; }
+    timers.push(setTimeout(() => { qi++; render(); }, 1500));
+  };
+  q.opts.forEach((o, j) => opts.append(btn(o, 'opt', () => pick(j))));
+  p.append(opts, status); main.append(p);
+  const tick = () => { const rem = QMS - (performance.now() - t0); bar.style.transform = 'scaleX(' + Math.max(0, rem / QMS) + ')'; if (rem <= 0) pick(-1); else if (!done) timers.push(requestAnimationFrame(tick)); };
+  timers.push(requestAnimationFrame(tick));
+}
+async function roomSubmit(v) {   // best of this round only, like the hub's arcade games
+  if (!contest() || !uid) return false;
+  try {
+    const ref = R(roomBase + '/scores/' + uid), prev = (await D.get(ref)).val();
+    if (prev && prev.round === room.round && prev.best >= v) return true;
+    await D.set(ref, { best: v, at: now(), round: room.round });
+    return true;
+  } catch { return false; }
+}
+async function saveBest(v) {
+  const lb = LS.get('best', {});
+  const local = lb.cs2 || 0;
+  if (v > local) { lb.cs2 = v; LS.set('best', lb); }
+  if (!D || !uid) return v > local ? 'Шинэ дээд амжилт (энэ төхөөрөмж).' : 'Таны дээд: ' + local;
+  try {
+    const cur = (await D.get(R('scores/' + uid + '/cs2/best'))).val() || 0;
+    if (v > cur) { await D.update(R('scores/' + uid), { cs2: { best: v, at: Date.now() } }); return 'Шинэ дээд амжилт! Онооны самбарт хадгалагдлаа.'; }
+    return 'Таны дээд: ' + cur + ' оноо.';
+  } catch { return ''; }
+}
+
+/* ---------- Зургаар таах: a highlighted area on the sketch, pick its callout ---------- */
+let gMap = LS.get('cs2gmap', 'all'), gRound = null;
+function viewGuess(main) {
+  const p = el('div', 'panel');
+  p.append(el('h2', '', 'Газрын зургаар таах'), el('p', 'note', 'Тодруулсан хэсгийг юу гэж нэрлэдэг вэ (callout)? Газрын зураг нь бидний зурсан ойролцоо схем, бодит радартай яг таарахгүй.'),
+    seg([['Бүгд', 'all'], ...Object.entries(MAPS).map(([k, m]) => [m.name, k])], gMap, v => { gMap = v; LS.set('cs2gmap', v); gRound = null; render(); }));
+  if (!gRound) gRound = { n: 0, ok: 0, cur: null };
+  if (gRound.n >= 10) {
+    p.append(el('div', 'big', gRound.ok + ' / 10'), el('p', '', 'зөв таалаа.'), btn('Дахин', 'btn', () => { gRound = null; render(); }));
+    main.append(p); return;
+  }
+  if (!gRound.cur) {
+    const key = gMap === 'all' ? shuffle(Object.keys(MAPS))[0] : gMap, zs = MAPS[key].zones.map(z => z[0]);
+    const right = shuffle(zs)[0];
+    gRound.cur = { key, right, opts: shuffle([right, ...shuffle(zs.filter(z => z !== right)).slice(0, 3)]) };
+  }
+  const c = gRound.cur, grid = el('div', 'grid'), side = el('div', 'panel');
+  grid.append(drawMap(c.key, { hi: c.right, hideHi: true }), side);
+  side.append(el('div', 'meta'), el('h3', '', MAPS[c.key].name + ': тодруулсан хэсэг аль нь вэ?'));
+  side.firstChild.append(el('span', '', 'Асуулт ' + (gRound.n + 1) + ' / 10'), el('span', '', gRound.ok + ' зөв'));
+  const opts = el('div', 'opts'), status = el('div', 'status');
+  c.opts.forEach(o => opts.append(btn(o, 'opt', () => {
+    [...opts.children].forEach(b => { b.disabled = true; if (b.textContent === c.right) b.classList.add('right'); else if (b.textContent === o) b.classList.add('wrong'); });
+    const ok = o === c.right; if (ok) gRound.ok++;
+    status.textContent = ok ? 'Зөв!' : 'Буруу. Зөв нь: ' + c.right; status.className = 'status ' + (ok ? 'good' : 'bad');
+    timers.push(setTimeout(() => { gRound.n++; gRound.cur = null; render(); }, 1300));
+  })));
+  side.append(opts, status); p.append(grid); main.append(p);
+}
+
+/* ---------- Utility: browse lineups on the sketch, practise where they land ---------- */
+let uMap = LS.get('cs2umap', 'mirage'), uType = 'all', uSel = null, uPrac = null;
+function viewUtil(main) {
+  if (!MAPS[uMap]) uMap = 'mirage';
+  const p = el('div', 'panel');
+  p.append(el('h2', '', 'Utility lineup'),
+    el('p', 'note', 'Хаана зогсож, хааш онилж, ямар аргаар шидэхэд хаана унахыг үзнэ. «Шалгаагүй» гэсэн lineup-ийг тоглоом дотроо шалгаад засаарай.'),
+    seg(Object.entries(MAPS).map(([k, m]) => [m.name, k]), uMap, v => { uMap = v; LS.set('cs2umap', v); uSel = null; uPrac = null; render(); }),
+    seg([['Бүгд', 'all'], ...Object.entries(UT).map(([k, v]) => [v[0], k])], uType, v => { uType = v; uSel = null; render(); }));
+  const list = lineups().filter(l => l.map === uMap && (uType === 'all' || l.t === uType));
+  if (uPrac) return practice(main, p, list);
+  const grid = el('div', 'grid'), side = el('div', 'panel');
+  const cur = list.find(l => l.id === uSel);
+  grid.append(drawMap(uMap, { lineups: list, sel: uSel }), side);
+  if (cur) {
+    side.append(el('h3', '', cur.n || 'Lineup'));
+    const b = el('div', 'row'); b.append(el('span', 'badge ' + (cur.ok ? 'ok' : 'no'), cur.ok ? 'Баталгаажсан' : 'Шалгаагүй'), el('span', 'note', (UT[cur.t] || UT.smoke)[0]));
+    const kv = el('div', 'kv');
+    kv.append(el('b', '', 'Зогсох'), el('span', '', 'Газрын зураг дээрх улбар шар цэг'), el('b', '', 'Шидэх'), el('span', '', HOW[cur.how] || '—'),
+      el('b', '', 'Онилох'), el('span', '', cur.aim || 'Тэмдэглээгүй. Видеог үзэж, тоглоом дотроо шалгаад нэмж бичээрэй.'));
+    side.append(b, kv);
+    if (cur.yt) { const a = el('a', '', 'Видео үзэх ↗'); a.href = cur.yt; a.target = '_blank'; a.rel = 'noopener'; side.append(a); }
+    if (cur.db) side.append(el('p', 'note', 'Нэмсэн: ' + (cur.who || 'багийн гишүүн')));
+    const acts = el('div', 'row');
+    if (cur.db && admin) acts.append(btn(cur.ok ? 'Баталгаажуулалтыг болиулах' : 'Баталгаажуулах', 'btn ghost', () => D.update(R('cs2/lu/' + cur.id), { ok: !cur.ok }).catch(() => alert('Чадсангүй'))));
+    if (cur.db && cur.by === uid) { acts.append(btn('Засах', 'btn ghost', () => { editLu = { ...cur }; tab = 'add'; render(); }), btn('Устгах', 'btn ghost', () => { if (confirm('Энэ lineup-ийг устгах уу?')) D.remove(R('cs2/lu/' + cur.id)).catch(() => {}); uSel = null; })); }
+    if (acts.childElementCount) side.append(acts);
+  } else side.append(el('p', 'note', list.length ? 'Жагсаалтаас нэгийг сонгоорой.' : 'Энэ газрын зурагт lineup алга. «Нэмэх» хэсгээс нэмээрэй.'));
+  const items = el('div', 'list');
+  for (const l of list) {
+    const it = btn('', 'item', () => { uSel = l.id; render(); });
+    it.setAttribute('aria-pressed', String(l.id === uSel));
+    const dot = el('span', 'dot'); dot.style.background = (UT[l.t] || UT.smoke)[1];
+    const nm = el('span', 'nm', l.n || 'Lineup'); nm.append(el('small', '', (UT[l.t] || UT.smoke)[0] + ' · ' + (HOW[l.how] || '') ));
+    it.append(dot, nm, el('span', 'badge ' + (l.ok ? 'ok' : 'no'), l.ok ? '✓' : '?'));
+    items.append(it);
+  }
+  side.append(items);
+  if (list.length) side.append(btn('Дасгал: хаана унах вэ?', 'btn', () => { uPrac = { n: 0, pts: 0, cur: null, guess: null }; render(); }));
+  p.append(grid); main.append(p);
+}
+function practice(main, p, list) {
+  const P = uPrac;
+  if (P.n >= 5 || !list.length) {
+    p.append(el('div', 'big', P.pts + ' / 500'), el('p', '', 'Дасгал дууслаа.'), el('div', 'row'));
+    p.lastChild.append(btn('Дахин', 'btn', () => { uPrac = { n: 0, pts: 0, cur: null, guess: null }; render(); }), btn('Жагсаалт руу', 'btn ghost', () => { uPrac = null; render(); }));
+    main.append(p); return;
+  }
+  if (!P.cur) { P.cur = shuffle(list)[0]; P.guess = null; }
+  const c = P.cur, grid = el('div', 'grid'), side = el('div', 'panel');
+  const pts = [{ x: c.sx, y: c.sy, c: '#FF9426', r: 1.9 }];
+  if (P.guess) pts.push({ x: P.guess.x, y: P.guess.y, c: '#3A86D6', r: 1.6 });
+  grid.append(drawMap(c.map, { lineups: P.guess ? [c] : [], sel: P.guess ? c.id : null, points: pts, pick: P.guess ? null : (x, y) => {
+    const d = Math.hypot(x - c.lx, y - c.ly), s = Math.max(0, Math.round(100 - d * 6));
+    P.guess = { x, y, d, s }; P.pts += s; render();
+  } }), side);
+  side.append(el('div', 'meta'), el('h3', '', (c.n || 'Lineup') + ': ' + (UT[c.t] || UT.smoke)[0] + ' хаана унах вэ?'),
+    el('p', 'note', 'Улбар шар цэг дээр зогсоод «' + (HOW[c.how] || '') + '» аргаар шидэнэ. Газрын зураг дээр унах газрыг товшино уу.'));
+  side.firstChild.append(el('span', '', (P.n + 1) + ' / 5'), el('span', '', P.pts + ' оноо'));
+  if (P.guess) {
+    side.append(el('div', 'status ' + (P.guess.s >= 60 ? 'good' : 'bad'), P.guess.s >= 60 ? 'Сайн байна! +' + P.guess.s : 'Зөрүүтэй. +' + P.guess.s),
+      el('p', 'note', 'Энэ lineup ' + (c.ok ? 'баталгаажсан.' : 'шалгагдаагүй тул бодит байрлал өөр байж болно.')),
+      btn(P.n + 1 >= 5 ? 'Дүн харах' : 'Дараагийнх', 'btn', () => { P.n++; P.cur = null; render(); }));
+  }
+  p.append(grid, btn('Дасгалыг зогсоох', 'btn ghost', () => { uPrac = null; render(); }));
+  main.append(p);
+}
+
+/* ---------- Нэмэх: the team adds lineups and questions (stored in Firebase) ---------- */
+let editLu = null, editQ = null, addWhat = 'lu', qMsg = '';
+function viewAdd(main) {
+  const p = el('div', 'panel');
+  p.append(el('h2', '', 'Нэмэх'), seg([['Lineup', 'lu'], ['Асуулт', 'q']], addWhat, v => { addWhat = v; render(); }));
+  if (!CFG) { p.append(el('p', 'note', 'Сервер тохируулаагүй тул нэмэх боломжгүй.')); main.append(p); return; }
+  if (!D) { p.append(el('p', 'note', 'Сервертэй холбогдож байна…')); main.append(p); return; }
+  if (addWhat === 'lu') luEditor(p); else qEditor(p);
+  main.append(p);
+}
+function luEditor(p) {
+  const E = editLu || (editLu = { map: uMap, t: 'smoke', n: '', sx: null, sy: null, lx: null, ly: null, how: 'left', aim: '', yt: '' });
+  const step = E.sx == null ? 'stand' : E.lx == null ? 'land' : 'done';
+  const err = el('p', 'note', '');
+  p.append(el('p', 'note', E.id ? 'Lineup засаж байна.' : 'Шинэ lineup. Эхлээд газрын зураг дээр зогсох цэгээ, дараа нь унах цэгээ товшино.'));
+  p.append(seg(Object.entries(MAPS).map(([k, m]) => [m.name, k]), E.map, v => { E.map = v; E.sx = E.sy = E.lx = E.ly = null; render(); }),
+    seg(Object.entries(UT).map(([k, v]) => [v[0], k]), E.t, v => { E.t = v; render(); }));
+  const grid = el('div', 'grid'), side = el('div', 'panel');
+  const shown = E.sx == null ? [] : [{ ...E, id: 'edit', sx: E.sx, sy: E.sy, lx: E.lx ?? E.sx, ly: E.ly ?? E.sy }];
+  grid.append(drawMap(E.map, { lineups: E.lx == null ? [] : shown, sel: 'edit', points: E.sx != null && E.lx == null ? [{ x: E.sx, y: E.sy, c: '#FF9426', r: 1.9 }] : [], pick: (x, y) => {
+    if (step === 'stand' || step === 'done' && !E.lx) { E.sx = x; E.sy = y; } else if (step === 'land') { E.lx = x; E.ly = y; } else { E.sx = x; E.sy = y; E.lx = E.ly = null; }
+    render();
+  } }), side);
+  side.append(el('div', 'status', step === 'stand' ? '1. Зогсох цэгээ товш' : step === 'land' ? '2. Унах цэгээ товш' : 'Цэгүүд бэлэн. Дахин товшвол зогсох цэгээс эхэлнэ.'));
+  const name = el('input'); name.maxLength = 40; name.placeholder = 'Нэр, жишээ нь «Window smoke»'; name.value = E.n; name.oninput = () => { E.n = name.value; };
+  const how = el('select'); for (const [k, v] of Object.entries(HOW)) { const o = el('option', '', v); o.value = k; o.selected = E.how === k; how.append(o); } how.onchange = () => { E.how = how.value; };
+  const aim = el('textarea'); aim.rows = 3; aim.maxLength = 200; aim.placeholder = 'Хаашаа онилох: жишээ нь «антенны орой», «цонхны баруун булан»'; aim.value = E.aim; aim.oninput = () => { E.aim = aim.value; };
+  const yt = el('input'); yt.maxLength = 200; yt.placeholder = 'YouTube холбоос (заавал биш)'; yt.value = E.yt; yt.oninput = () => { E.yt = yt.value.trim(); };
+  const lab = (t, x) => { const l = el('label', 'f', t); l.append(x); return l; };
+  side.append(lab('Нэр', name), lab('Шидэх арга', how), lab('Онилох', aim), lab('Видео', yt), err);
+  side.append(el('div', 'row'));
+  side.lastChild.append(btn('Хадгалах', 'btn', async () => {
+    if (E.sx == null || E.lx == null) { err.textContent = 'Зогсох, унах цэгээ газрын зураг дээр товшино уу.'; return; }
+    if (!E.n.trim()) { err.textContent = 'Нэр бичнэ үү.'; return; }
+    if (E.yt && !/^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(E.yt)) { err.textContent = 'Видео нь YouTube-ийн https холбоос байх ёстой.'; return; }
+    const id = E.id || rid(), body = { map: E.map, t: E.t, n: E.n.trim().slice(0, 40), sx: E.sx, sy: E.sy, lx: E.lx, ly: E.ly, how: E.how, aim: E.aim.trim().slice(0, 200), yt: E.yt || null, ok: false, by: uid, who: myName || null, at: Date.now() };
+    try { await D.set(R('cs2/lu/' + id), body); editLu = null; uMap = E.map; uSel = id; tab = 'util'; render(); }
+    catch { err.textContent = 'Хадгалж чадсангүй.'; }
+  }), btn('Цэвэрлэх', 'btn ghost', () => { editLu = null; render(); }));
+  p.append(grid, el('p', 'note', 'Хадгалахад «Шалгаагүй» гэж тэмдэглэгдэнэ. Самбарын эзэн (админ) тоглоом дотор шалгасны дараа баталгаажуулна.'));
+}
+function qEditor(p) {
+  const E = editQ || (editQ = { q: '', o: ['', '', '', ''], k: 0, img: '' });
+  const err = el('p', 'note', qMsg); qMsg = '';
+  const q = el('textarea'); q.rows = 2; q.maxLength = 200; q.placeholder = 'Асуулт'; q.value = E.q; q.oninput = () => { E.q = q.value; };
+  p.append(el('p', 'note', 'Асуулт, 2–4 хариултаа бичээд зөвийг нь дугуйлна. Зураг хэрэгтэй бол эхлээд repo-гийн img/ хавтсанд оруулаад замыг нь бичнэ (жишээ нь img/mirage-a.png). Гадны холбоосыг аюулгүй байдлын үүднээс хүлээж авахгүй.'), q);
+  const name = 'qk' + rid();
+  E.o.forEach((v, j) => {
+    const r = el('div', 'optrow'), radio = el('input'), inp = el('input');
+    radio.type = 'radio'; radio.name = name; radio.checked = E.k === j; radio.onchange = () => { E.k = j; };
+    inp.maxLength = 80; inp.placeholder = (j + 1) + '-р хариулт' + (j > 1 ? ' (заавал биш)' : ''); inp.value = v; inp.oninput = () => { E.o[j] = inp.value; };
+    r.append(radio, inp); p.append(r);
+  });
+  const img = el('input'); img.maxLength = 200; img.placeholder = 'Зураг (заавал биш): img/файл.png'; img.value = E.img; img.oninput = () => { E.img = img.value.trim(); };
+  p.append(img, err, el('div', 'row'));
+  p.lastChild.append(btn('Хадгалах', 'btn', async () => {
+    const o = [], qq = E.q.trim(); let k = -1;
+    E.o.forEach((v, j) => { const s = v.trim(); if (s) { if (j === E.k) k = o.length; o.push(s); } });
+    if (!qq) { err.textContent = 'Асуултаа бичнэ үү.'; return; }
+    if (o.length < 2) { err.textContent = 'Дор хаяж 2 хариулт.'; return; }
+    if (k < 0) { err.textContent = 'Зөв хариултаа дугуйлна уу.'; return; }
+    if (E.img && !IMG_OK.test(E.img)) { err.textContent = 'Зураг нь img/ хавтсанд байх ёстой, жишээ нь img/mirage-a.png (png, jpg, webp, gif).'; return; }
+    try { await D.set(R('cs2/q/' + rid()), { q: qq.slice(0, 200), o, k, img: E.img || null, by: uid, at: Date.now() }); editQ = null; qMsg = 'Хадгалагдлаа. «Асуулт» хэсэгт бусадтай холилдож гарна.'; render(); }
+    catch { err.textContent = 'Хадгалж чадсангүй.'; }
+  }));
+  const mine = userQs.filter(x => x.by === uid);
+  if (mine.length) {
+    p.append(el('h3', '', 'Миний асуултууд'));
+    for (const x of mine) { const r = el('div', 'item'); r.append(el('span', 'nm', x.q), btn('Устгах', 'btn ghost', () => D.remove(R('cs2/q/' + x.id)).catch(() => {}))); p.append(r); }
+  }
+}
+
+/* ---------- start ---------- */
+render();
+if (CFG) connect().catch(() => {});
+</script>
+</body>
+</html>

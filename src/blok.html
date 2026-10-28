@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Блок тулаан · Цайны цаг</title>
+<meta name="description" content="Унаж буй блокоор мөр бүтээж арилгах тоглоом. Ганцаараа эсвэл өрөөнийхөнтэйгээ тулалдана: арилгасан мөр бүр өрсөлдөгч рүү хог мөр болж очно.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23E8780A'/%3E%3Cg fill='%2317202B'%3E%3Crect x='12' y='30' width='12' height='12'/%3E%3Crect x='26' y='30' width='12' height='12'/%3E%3Crect x='40' y='30' width='12' height='12'/%3E%3Crect x='26' y='16' width='12' height='12'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@700;800&display=swap">
+<style>
+/* Layout: board in the middle; hold + stats left, next + opponents right (stacked above/below on phones); touch pad under the board. */
+:root{--bg:#10151C;--surface:#18202A;--sunk:#0C1117;--ink:#E6ECF2;--muted:#94A2B1;--line:#2A3440;--accent:#FF9426;--accent-ink:#1C1004;--good:#3CC57A;--bad:#F06868;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 "Golos Text","Segoe UI",system-ui,sans-serif;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+button{font:inherit;color:inherit;cursor:pointer}
+[hidden]{display:none!important}
+.wrap{max-width:1100px;margin:0 auto;padding:10px max(12px,env(safe-area-inset-left)) 16px max(12px,env(safe-area-inset-right));display:flex;flex-direction:column;gap:10px;min-height:100dvh}
+.top{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap}
+.top h1{font-family:Unbounded,sans-serif;font-size:clamp(20px,4vw,28px);margin:0;flex:1 1 auto}
+.top h1 b{color:var(--accent)}
+.back{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 14px;font-weight:600;text-decoration:none;color:var(--ink)}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{border:1px solid var(--line);background:transparent;border-radius:999px;padding:6px 13px;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#17202B;border-color:var(--ink)}
+.game{display:grid;grid-template-columns:150px auto minmax(150px,260px);gap:14px;justify-content:center;align-items:start}
+.left,.right{display:flex;flex-direction:column;gap:10px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.panel canvas{align-self:center;max-width:100%}
+@media (max-width:720px){
+  .game{grid-template-columns:56px auto 56px;gap:8px}
+  .left,.right{gap:8px}
+  .panel{padding:6px 4px;border-radius:10px;gap:4px;text-align:center}
+  .panel .label{font-size:9px;letter-spacing:.02em}
+  .stat b{font-size:13px}
+  #hold{width:48px;height:auto}
+  #next{width:48px;height:auto}
+  .opps{grid-template-columns:1fr;gap:6px}
+  .ov{position:fixed;border-radius:0;z-index:5}
+}
+.label{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.stat b{font-family:Unbounded,sans-serif;font-size:18px;display:block}
+.center{position:relative}
+#board{display:block;border-radius:10px;background:#0B1016;box-shadow:0 0 0 2px var(--line),0 14px 40px rgba(0,0,0,.4);touch-action:none}
+.meter{position:absolute;left:-7px;bottom:0;width:5px;border-radius:4px;background:var(--bad);transition:height .15s}
+.ov{position:absolute;inset:0;display:grid;place-items:center;background:rgba(10,14,20,.6);border-radius:10px;padding:10px}
+.card{width:min(320px,100%);max-height:100%;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;text-align:center}
+.card h2{margin:0;font-family:Unbounded,sans-serif;font-size:18px}
+.card p{margin:0;color:var(--muted);font-size:14px}
+.big{font-family:Unbounded,sans-serif;font-size:32px;font-weight:800;color:var(--accent)}
+.btn{border:0;border-radius:12px;padding:10px 16px;font-weight:700;background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+input{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--sunk);color:var(--ink);font:inherit;width:100%}
+.opps{display:grid;grid-template-columns:repeat(auto-fill,minmax(66px,1fr));gap:8px}
+.opp{display:flex;flex-direction:column;gap:3px;font-size:11.5px;min-width:0}
+.opp canvas{width:100%;height:auto;border-radius:4px;background:#0B1016;border:1px solid var(--line)}
+.opp .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.opp.out{opacity:.4}
+.opp.me .nm{color:var(--accent)}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12.5px;color:var(--muted);text-align:left}
+.keys b{color:var(--ink);font-weight:600}
+.pad{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;max-width:520px;width:100%;margin:0 auto;touch-action:none;user-select:none;-webkit-user-select:none}
+.pad button{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:14px 0;font-size:20px;font-weight:700}
+.pad button.hd{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.pad button:active{transform:scale(.96)}
+@media (hover:hover) and (pointer:fine){.pad{display:none}}
+.msg{font-weight:700;color:var(--accent);min-height:20px;text-align:center}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="index.html">← Цэс</a>
+    <h1>Блок <b>тулаан</b></h1>
+    <div class="seg" id="modes"><button type="button" data-mode="solo">Ганцаараа</button><button type="button" data-mode="battle">Тулаан</button></div>
+  </header>
+  <div class="msg" id="msg"></div>
+  <main class="game">
+    <aside class="left">
+      <div class="panel"><span class="label">Хадгалсан (C)</span><canvas id="hold" width="96" height="64"></canvas></div>
+      <div class="panel stat"><span class="label">Оноо</span><b id="score">0</b><span class="label">Мөр</span><b id="lines">0</b><span class="label">Шат</span><b id="level">1</b></div>
+    </aside>
+    <div class="center">
+      <canvas id="board" aria-label="Тоглоомын талбай"></canvas>
+      <div class="meter" id="meter" style="height:0"></div>
+      <div class="ov" id="ov"><div class="card" id="card"></div></div>
+    </div>
+    <aside class="right">
+      <div class="panel"><span class="label">Дараагийнх</span><canvas id="next" width="96" height="200"></canvas></div>
+      <div class="panel" id="oppPanel" hidden><span class="label" id="oppTitle">Өрсөлдөгчид</span><div class="opps" id="opps"></div></div>
+    </aside>
+  </main>
+  <div class="pad" id="pad">
+    <button type="button" data-k="hold" aria-label="Хадгалах">⇄</button>
+    <button type="button" data-k="left" aria-label="Зүүн">←</button>
+    <button type="button" data-k="rot" aria-label="Эргүүлэх">⟳</button>
+    <button type="button" data-k="right" aria-label="Баруун">→</button>
+    <button type="button" data-k="down" aria-label="Доош">↓</button>
+    <button type="button" data-k="drop" class="hd" aria-label="Унагах">⤓</button>
+  </div>
+</div>
+
+<script src="firebase-config.js"></script>
+<script type="module">
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+const btn = (label, cls, fn) => { const b = el('button', cls, label); b.type = 'button'; b.onclick = fn; return b; };
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('tsai:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('tsai:' + k, JSON.stringify(v)); } catch {} },
+};
+const rid = () => Math.random().toString(36).slice(2, 10);
+const fmt = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+let myName = String(LS.get('nick', '') || '').trim().slice(0, 24);
+const CODE = ((location.hash.match(/r=([A-Za-z0-9]{4,6})/) || [])[1] || '').toUpperCase();
+const M = CODE || 'pub';
+if (CODE) $('.back').href = 'index.html#r=' + CODE;
+let actx = null;
+function sfx(kind) {
+  if (LS.get('mute', false)) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+    const f = { move: 300, rot: 420, lock: 180, clear: 660, four: 880, hold: 520, garbage: 120, over: 90, win: 1040 }[kind] || 440;
+    o.type = kind === 'garbage' || kind === 'over' ? 'sawtooth' : 'triangle';
+    o.frequency.setValueAtTime(f, t);
+    if (kind === 'clear' || kind === 'four' || kind === 'win') o.frequency.exponentialRampToValueAtTime(f * 1.5, t + 0.15);
+    const len = kind === 'move' || kind === 'rot' ? 0.05 : kind === 'over' ? 0.5 : 0.14;
+    g.gain.setValueAtTime(kind === 'move' ? 0.03 : 0.07, t); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len + 0.05);
+  } catch {}
+}
+
+/* ---------- pieces: standard shapes, rotation by turning the bounding box, standard wall kicks ---------- */
+const W = 10, H = 22, VIS = 20;   // two hidden rows on top
+const COLORS = [null, '#3CC5E0', '#F2C230', '#A35CDE', '#3CC57A', '#F06868', '#3A86D6', '#FF9426', '#5B6878'];   // I O T S Z J L, 8 = garbage
+const SHAPES = {   // cells of rotation 0 inside an n×n box
+  1: [4, [[0, 1], [1, 1], [2, 1], [3, 1]]], 2: [2, [[0, 0], [1, 0], [0, 1], [1, 1]]], 3: [3, [[1, 0], [0, 1], [1, 1], [2, 1]]],
+  4: [3, [[1, 0], [2, 0], [0, 1], [1, 1]]], 5: [3, [[0, 0], [1, 0], [1, 1], [2, 1]]], 6: [3, [[0, 0], [0, 1], [1, 1], [2, 1]]], 7: [3, [[2, 0], [0, 1], [1, 1], [2, 1]]],
+};
+function cellsOf(t, r) {
+  const [n, base] = SHAPES[t];
+  return base.map(([x, y]) => { for (let i = 0; i < r; i++) [x, y] = [n - 1 - y, x]; return [x, y]; });
+}
+// kicks as (dx, dy) with y pointing up, from state a to state b; tried in order
+const KICK = {
+  '01': [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]], '10': [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+  '12': [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]], '21': [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+  '23': [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]], '32': [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+  '30': [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]], '03': [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+};
+const KICK_I = {
+  '01': [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]], '10': [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]],
+  '12': [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]], '21': [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]],
+  '23': [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]], '32': [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]],
+  '30': [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]], '03': [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]],
+};
+function rng(seed) { let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+/* ---------- game state ---------- */
+const G = { board: null, cur: null, hold: 0, held: false, queue: [], bag: [], rnd: Math.random, score: 0, lines: 0, level: 1, combo: -1, b2b: false,
+  fall: 0, lockT: 0, lockMoves: 0, over: true, paused: false, garbage: [], mode: 'solo', round: '', startLevel: 1 };
+const empty = () => Array.from({ length: H }, () => new Array(W).fill(0));
+function nextPiece() {
+  while (G.queue.length < 6) {
+    if (!G.bag.length) { G.bag = [1, 2, 3, 4, 5, 6, 7]; for (let i = 6; i > 0; i--) { const j = Math.floor(G.rnd() * (i + 1)); [G.bag[i], G.bag[j]] = [G.bag[j], G.bag[i]]; } }
+    G.queue.push(G.bag.pop());
+  }
+  return G.queue.shift();
+}
+function fits(t, r, x, y) {
+  for (const [cx, cy] of cellsOf(t, r)) {
+    const X = x + cx, Y = y + cy;
+    if (X < 0 || X >= W || Y >= H || (Y >= 0 && G.board[Y][X])) return false;
+  }
+  return true;
+}
+function spawn(t) {
+  G.cur = { t, r: 0, x: t === 2 ? 4 : 3, y: t === 1 ? 0 : 1 };
+  G.fall = 0; G.lockT = 0; G.lockMoves = 0;
+  if (!fits(t, 0, G.cur.x, G.cur.y)) { topOut(); return false; }
+  if (fits(t, 0, G.cur.x, G.cur.y + 1)) G.cur.y++;   // drop into sight at once
+  return true;
+}
+function startGame(mode, seed) {
+  G.mode = mode; G.board = empty(); G.queue = []; G.bag = []; G.rnd = seed != null ? rng(seed) : Math.random;
+  G.hold = 0; G.held = false; G.score = 0; G.lines = 0; G.level = G.startLevel; G.combo = -1; G.b2b = false; G.garbage = []; G.over = false; G.paused = false; G.sent = 0;
+  G.t0 = performance.now();
+  spawn(nextPiece()); paintSide(); hideOv(); publish(true);
+}
+const gravity = () => Math.max(0.04, 0.8 * Math.pow(0.85, G.level - 1));   // seconds per row
+function move(dx) {
+  if (!G.cur || G.over) return false;
+  if (fits(G.cur.t, G.cur.r, G.cur.x + dx, G.cur.y)) { G.cur.x += dx; touchLock(); sfx('move'); return true; }
+  return false;
+}
+function rotate(dir) {
+  const c = G.cur; if (!c || G.over || c.t === 2) return;
+  const to = (c.r + dir + 4) % 4, table = c.t === 1 ? KICK_I : KICK;
+  for (const [dx, dy] of table['' + c.r + to]) {
+    if (fits(c.t, to, c.x + dx, c.y - dy)) { c.r = to; c.x += dx; c.y -= dy; touchLock(); sfx('rot'); return; }
+  }
+}
+function touchLock() { if (G.lockMoves < 15 && !fits(G.cur.t, G.cur.r, G.cur.x, G.cur.y + 1)) { G.lockT = 0; G.lockMoves++; } }
+function softDrop() { if (G.cur && fits(G.cur.t, G.cur.r, G.cur.x, G.cur.y + 1)) { G.cur.y++; G.score += 1; G.fall = 0; return true; } return false; }
+function hardDrop() {
+  if (!G.cur || G.over) return;
+  let n = 0; while (fits(G.cur.t, G.cur.r, G.cur.x, G.cur.y + 1)) { G.cur.y++; n++; }
+  G.score += 2 * n; lock();
+}
+function hold() {
+  if (!G.cur || G.over || G.held) return;
+  const t = G.cur.t; G.held = true; sfx('hold');
+  if (G.hold) spawn(G.hold); else spawn(nextPiece());
+  G.hold = t; paintSide();
+}
+function ghostY() { let y = G.cur.y; while (fits(G.cur.t, G.cur.r, G.cur.x, y + 1)) y++; return y; }
+const SEND = [0, 0, 1, 2, 4];
+function lock() {
+  const c = G.cur;
+  for (const [cx, cy] of cellsOf(c.t, c.r)) { const Y = c.y + cy; if (Y >= 0) G.board[Y][c.x + cx] = c.t; }
+  if (cellsOf(c.t, c.r).every(([, cy]) => c.y + cy < H - VIS)) { G.cur = null; topOut(); return; }   // locked fully above the field
+  // clear full rows
+  let n = 0;
+  for (let y = H - 1; y >= 0; y--) if (G.board[y].every(v => v)) { G.board.splice(y, 1); G.board.unshift(new Array(W).fill(0)); n++; y++; }
+  if (n) {
+    G.combo++;
+    const four = n === 4, base = [0, 100, 300, 500, 800][n] * G.level;
+    G.score += Math.round(base * (four && G.b2b ? 1.5 : 1)) + 50 * G.combo * G.level;
+    let send = SEND[n] + (four && G.b2b ? 1 : 0) + Math.floor(Math.max(0, G.combo) / 2);
+    G.b2b = four;
+    G.lines += n; G.level = G.startLevel + Math.floor(G.lines / 10);
+    sfx(four ? 'four' : 'clear');
+    // lines first cancel garbage that is on its way to me, the rest goes to an opponent
+    while (send > 0 && G.garbage.length) { const take = Math.min(send, G.garbage[0]); G.garbage[0] -= take; send -= take; if (!G.garbage[0]) G.garbage.shift(); }
+    if (send > 0) attack(send);
+  } else {
+    G.combo = -1;
+    sfx('lock');
+    applyGarbage();
+  }
+  G.held = false;
+  if (!G.over) spawn(nextPiece());
+  paintSide(); publish(true);
+}
+function applyGarbage() {
+  let total = 0;
+  while (G.garbage.length && total < 8) {
+    const n = Math.min(G.garbage[0], 8 - total), hole = Math.floor(Math.random() * W);
+    for (let i = 0; i < n; i++) { G.board.shift(); const row = new Array(W).fill(8); row[hole] = 0; G.board.push(row); }
+    total += n; G.garbage[0] -= n; if (!G.garbage[0]) G.garbage.shift();
+  }
+  if (total) sfx('garbage');
+}
+function topOut() {
+  G.over = true; sfx('over');
+  if (G.mode === 'solo') endSolo(); else battleOut();
+}
+
+/* ---------- drawing ---------- */
+const board = $('#board'), bx = board.getContext('2d');
+let CELL = 28;
+function fit() {
+  const pad = matchMedia('(hover:hover) and (pointer:fine)').matches ? 0 : 92;   // the touch buttons under the board
+  const availH = Math.min(innerHeight - 120 - pad, 720), availW = innerWidth <= 720 ? innerWidth - 24 - 2 * 56 - 16 - 8 : 400;
+  CELL = Math.max(12, Math.min(34, Math.floor(Math.min(availH / VIS, availW / W))));
+  const d = Math.min(2, window.devicePixelRatio || 1);
+  board.style.width = W * CELL + 'px'; board.style.height = VIS * CELL + 'px';
+  board.width = W * CELL * d; board.height = VIS * CELL * d; bx.setTransform(d, 0, 0, d, 0, 0);
+}
+addEventListener('resize', fit); fit();
+function block(c, x, y, s, color, alpha = 1) {
+  c.globalAlpha = alpha; c.fillStyle = color; c.fillRect(x + 1, y + 1, s - 2, s - 2);
+  c.fillStyle = 'rgba(255,255,255,.22)'; c.fillRect(x + 1, y + 1, s - 2, Math.max(2, s * 0.18));
+  c.fillStyle = 'rgba(0,0,0,.22)'; c.fillRect(x + 1, y + s - 1 - Math.max(2, s * 0.14), s - 2, Math.max(2, s * 0.14));
+  c.globalAlpha = 1;
+}
+function draw() {
+  const c = bx; c.clearRect(0, 0, W * CELL, VIS * CELL);
+  c.strokeStyle = 'rgba(255,255,255,.05)'; c.lineWidth = 1;
+  for (let x = 1; x < W; x++) { c.beginPath(); c.moveTo(x * CELL + 0.5, 0); c.lineTo(x * CELL + 0.5, VIS * CELL); c.stroke(); }
+  for (let y = 1; y < VIS; y++) { c.beginPath(); c.moveTo(0, y * CELL + 0.5); c.lineTo(W * CELL, y * CELL + 0.5); c.stroke(); }
+  if (!G.board) return;
+  for (let y = H - VIS; y < H; y++) for (let x = 0; x < W; x++) if (G.board[y][x]) block(c, x * CELL, (y - (H - VIS)) * CELL, CELL, COLORS[G.board[y][x]]);
+  if (G.cur && !G.over) {
+    const gy = ghostY();
+    for (const [cx, cy] of cellsOf(G.cur.t, G.cur.r)) {
+      const Y = gy + cy - (H - VIS); if (Y >= 0) { c.strokeStyle = COLORS[G.cur.t]; c.globalAlpha = 0.5; c.strokeRect((G.cur.x + cx) * CELL + 2.5, Y * CELL + 2.5, CELL - 5, CELL - 5); c.globalAlpha = 1; }
+    }
+    for (const [cx, cy] of cellsOf(G.cur.t, G.cur.r)) { const Y = G.cur.y + cy - (H - VIS); if (Y >= 0) block(c, (G.cur.x + cx) * CELL, Y * CELL, CELL, COLORS[G.cur.t]); }
+  }
+  const g = G.garbage.reduce((a, b) => a + b, 0);
+  $('#meter').style.height = Math.min(VIS, g) * CELL + 'px';
+}
+function mini(canvas, t, s) {   // a piece drawn small in a side box
+  const c = canvas.getContext('2d'); if (!t) return;
+  const cells = cellsOf(t, 0), minx = Math.min(...cells.map(p => p[0])), maxx = Math.max(...cells.map(p => p[0])), miny = Math.min(...cells.map(p => p[1])), maxy = Math.max(...cells.map(p => p[1]));
+  const ox = (canvas.width - (maxx - minx + 1) * s) / 2 - minx * s, oy = (c.__oy || 0) + (64 - (maxy - miny + 1) * s) / 2 - miny * s;
+  for (const [x, y] of cells) block(c, ox + x * s, oy + y * s, s, COLORS[t]);
+}
+function paintSide() {
+  const h = $('#hold'), hc = h.getContext('2d'); hc.clearRect(0, 0, h.width, h.height); hc.globalAlpha = 1;
+  if (G.hold) { mini(h, G.hold, 18); if (G.held) { hc.fillStyle = 'rgba(16,21,28,.6)'; hc.fillRect(0, 0, h.width, h.height); } }
+  const n = $('#next'), nc = n.getContext('2d'); nc.clearRect(0, 0, n.width, n.height);
+  G.queue.slice(0, 3).forEach((t, i) => { nc.__oy = i * 66; mini(n, t, i ? 14 : 18); });
+  nc.__oy = 0;
+  $('#score').textContent = fmt(G.score); $('#lines').textContent = G.lines; $('#level').textContent = G.level;
+}
+
+/* ---------- input: keys with auto-repeat, phone pad with auto-repeat ---------- */
+const held = {};
+function act(k) {
+  if (G.over || G.paused || !G.cur) return;
+  if (k === 'left') move(-1); else if (k === 'right') move(1); else if (k === 'down') softDrop();
+  else if (k === 'rot') rotate(1); else if (k === 'ccw') rotate(-1); else if (k === 'drop') hardDrop(); else if (k === 'hold') hold();
+}
+const KEYMAP = { ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down', ArrowUp: 'rot', KeyX: 'rot', KeyZ: 'ccw', ControlLeft: 'ccw', Space: 'drop', KeyC: 'hold', ShiftLeft: 'hold', ShiftRight: 'hold' };
+const REPEAT = { left: 1, right: 1, down: 1 };
+function press(k) {
+  if (held[k]) return;
+  act(k);
+  if (REPEAT[k]) held[k] = { t: k === 'down' ? 0.05 : 0.17 };
+  else held[k] = { t: Infinity };
+}
+function release(k) { delete held[k]; }
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Escape' && G.mode === 'solo' && !G.over) { G.paused = !G.paused; if (G.paused) showPause(); else hideOv(); return; }
+  const k = KEYMAP[e.code]; if (!k) return;
+  e.preventDefault(); if (!e.repeat) press(k);
+});
+addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) release(k); });
+for (const b of document.querySelectorAll('#pad button')) {
+  b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); press(b.dataset.k); });
+  const up = () => release(b.dataset.k);
+  b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
+}
+// swipes on the board: tap = rotate, sideways = move one per cell, flick down = drop
+let sw = null;
+board.addEventListener('pointerdown', e => { sw = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 }; board.setPointerCapture(e.pointerId); });
+board.addEventListener('pointermove', e => {
+  if (!sw) return;
+  const dx = e.clientX - sw.x;
+  while (Math.abs(dx - sw.moved * CELL) >= CELL) { const d = dx > sw.moved * CELL ? 1 : -1; act(d > 0 ? 'right' : 'left'); sw.moved += d; }
+});
+board.addEventListener('pointerup', e => {
+  if (!sw) return;
+  const dx = e.clientX - sw.x, dy = e.clientY - sw.y, dt = performance.now() - sw.t;
+  if (dy > CELL * 2.5 && dy > Math.abs(dx) && dt < 400) act('drop');
+  else if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && dt < 300) act('rot');
+  sw = null;
+});
+
+/* ---------- loop ---------- */
+let last = performance.now();
+function frame(t) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (t - last) / 1000); last = t;
+  if (!G.over && !G.paused && G.cur) {
+    for (const k in held) { const h = held[k]; h.t -= dt; if (h.t <= 0) { act(k); h.t = k === 'down' ? 0.04 : 0.05; } }
+    if (G.cur) {
+      if (fits(G.cur.t, G.cur.r, G.cur.x, G.cur.y + 1)) {
+        G.lockT = 0; G.fall += dt;
+        while (G.cur && G.fall >= gravity()) { G.fall -= gravity(); if (fits(G.cur.t, G.cur.r, G.cur.x, G.cur.y + 1)) G.cur.y++; else break; }
+      } else { G.lockT += dt; if (G.lockT >= 0.5) lock(); }
+    }
+    if (G.mode === 'battle') { battleTick(); publish(false); }
+  }
+  draw();
+}
+requestAnimationFrame(frame);
+
+/* ---------- overlay card ---------- */
+const ov = $('#ov'), card = $('#card');
+function hideOv() { ov.hidden = true; }
+function showCard(...nodes) { card.replaceChildren(...nodes); ov.hidden = false; }
+let mode = LS.get('blokMode', 'solo') === 'battle' ? 'battle' : 'solo';
+$('#modes').onclick = e => { const b = e.target.closest('[data-mode]'); if (!b || (!G.over && G.mode === mode)) { if (b && !G.over) flash('Эхлээд энэ тоглолтоо дуусгаарай.'); return; } mode = b.dataset.mode; LS.set('blokMode', mode); paintModes(); lobby(); };
+function paintModes() { for (const b of document.querySelectorAll('#modes button')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode)); $('#oppPanel').hidden = mode !== 'battle'; }
+let flashT = 0;
+function flash(t) { $('#msg').textContent = t; clearTimeout(flashT); flashT = setTimeout(() => { $('#msg').textContent = ''; }, 2500); }
+function nameBlock() {
+  const r = el('div', 'row'), inp = el('input'); inp.placeholder = 'Нэрээ бичээрэй'; inp.maxLength = 24;
+  const ok = btn('Хадгалах', 'btn', () => { const n = inp.value.trim().slice(0, 24); if (!n) return; myName = n; LS.set('nick', n); if (net) D.set(D.ref(rdb, 'names/' + uid), n).catch(() => {}); lobby(); });
+  inp.onkeydown = e => { if (e.key === 'Enter') ok.click(); };
+  r.append(inp, ok); setTimeout(() => inp.focus(), 50); return r;
+}
+function help() {
+  const k = el('div', 'keys');
+  const rows = matchMedia('(pointer: coarse)').matches
+    ? [['← →', 'хөдөлгөх (талбай дээр хажуу тийш шудрах)'], ['⟳', 'эргүүлэх (талбай дээр товших)'], ['↓', 'хурдан буулгах'], ['⤓', 'шууд унагах (доош шудрах)'], ['⇄', 'хадгалах']]
+    : [['← →', 'хөдөлгөх'], ['↑ / X', 'эргүүлэх'], ['Z', 'эсрэг эргүүлэх'], ['↓', 'хурдан буулгах'], ['Space', 'шууд унагах'], ['C / Shift', 'хадгалах'], ['Esc', 'түр зогсоох']];
+  for (const [a, b] of rows) k.append(el('b', '', a), el('span', '', b));
+  return k;
+}
+function lobby() {
+  paintModes();
+  if (!myName) return showCard(el('h2', '', 'Блок тулаан'), el('p', '', 'Нэрээ бичээд эхэлье.'), nameBlock());
+  if (mode === 'solo') return soloLobby();
+  battleLobby();
+}
+
+/* ---------- solo ---------- */
+let best = Number(LS.get('best', {}).blok) || 0;
+function soloLobby() {
+  const nodes = [el('h2', '', 'Ганцаараа'), el('p', '', 'Мөр бүтээж арилгана. 10 мөр тутамд хурд нэмэгдэнэ. 4 мөр зэрэг арилгавал хамгийн их оноо.')];
+  if (best) nodes.push(el('p', '', 'Таны дээд: ' + fmt(best) + ' оноо'));
+  if (contest()) nodes.push(el('p', '', 'Өрөө ' + CODE + ': Блокийн тэмцээн явагдаж байна. Оноо тань өрөөний жагсаалтад орно.'));
+  nodes.push(el('div', 'row'), help());
+  nodes[nodes.length - 2].append(btn('Эхлэх', 'btn', () => { G.startLevel = 1; startGame('solo'); }));
+  showCard(...nodes);
+}
+function showPause() { showCard(el('h2', '', 'Түр зогслоо'), el('div', 'row')); card.lastChild.append(btn('Үргэлжлүүлэх', 'btn', () => { G.paused = false; hideOv(); }), btn('Шинээр', 'btn ghost', () => { G.over = true; G.paused = false; lobby(); })); }
+async function endSolo() {
+  const v = G.score, rec = v > best;
+  if (rec) { best = v; const lb = LS.get('best', {}); lb.blok = v; LS.set('best', lb); }
+  const saved = el('p', '', rec ? 'Шинэ дээд амжилт!' : 'Таны дээд: ' + fmt(best));
+  showCard(el('h2', '', 'Тоглоом дууслаа'), el('div', 'big', fmt(v)), el('p', '', G.lines + ' мөр · ' + G.level + '-р шат'), saved, el('div', 'row'));
+  card.lastChild.append(btn('Дахин', 'btn', () => startGame('solo')), btn('← Цэс', 'btn ghost', () => { location.href = $('.back').href; }));
+  if (!net) return;
+  try {
+    const cur = Number((await D.get(D.ref(rdb, 'scores/' + uid + '/blok/best'))).val()) || 0;
+    if (v > cur) { await D.update(D.ref(rdb, 'scores/' + uid), { blok: { best: v, at: now() } }); saved.textContent = 'Шинэ дээд амжилт! Онооны самбарт хадгалагдлаа.'; }
+    if (await roomSubmit(v)) saved.textContent += ' Өрөөний тэмцээнд бүртгэгдлээ.';
+  } catch {}
+}
+
+/* ---------- Firebase (same project and anonymous user as the hub) ---------- */
+const CFG = window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.databaseURL ? window.FIREBASE_CONFIG : null;
+const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
+let D = null, rdb = null, uid = 'local', net = false, offset = 0;
+const now = () => Date.now() + offset;
+const R = p => D.ref(rdb, 'blok/' + M + (p ? '/' + p : ''));
+let room = null, roomBase = '';
+const contest = () => room && room.game === 'blok' && room.round && now() < room.ends;
+async function roomSubmit(v) {
+  if (!contest()) return false;
+  try {
+    const ref = D.ref(rdb, roomBase + '/scores/' + uid), prev = (await D.get(ref)).val();
+    if (prev && prev.round === room.round && prev.best >= v) return true;
+    await D.set(ref, { best: v, at: now(), round: room.round }); return true;
+  } catch { return false; }
+}
+
+/* ---------- battle: every player plays their own board; cleared lines become garbage on someone else's ---------- */
+// blok/<M>/meta = {by, round, seed, start}; p/<uid> = {n, b: 200-char board, sc, out, pl, r, at}; g/<to>/<push> = {by, n, r}
+let meta = null, players = new Map(), canStart = false, myPlace = 0, ended = '';
+const BOARD_LEN = W * VIS;
+function boardStr() {
+  let s = '';
+  for (let y = H - VIS; y < H; y++) for (let x = 0; x < W; x++) s += G.board ? G.board[y][x] : 0;
+  if (G.cur && !G.over) { const a = s.split(''); for (const [cx, cy] of cellsOf(G.cur.t, G.cur.r)) { const Y = G.cur.y + cy - (H - VIS); if (Y >= 0) a[Y * W + G.cur.x + cx] = G.cur.t; } s = a.join(''); }
+  return s;
+}
+let lastPub = 0, lastStr = '';
+function publish(force) {
+  if (!net || G.mode !== 'battle' || !meta) return;
+  const t = performance.now();
+  if (!force && t - lastPub < 250) return;
+  const b = boardStr();
+  if (!force && b === lastStr) return;
+  lastPub = t; lastStr = b;
+  D.set(R('p/' + uid), { n: myName || 'Тоглогч', b, sc: Math.min(1e7, G.score), out: G.over, pl: myPlace, r: G.round || meta.round, at: now() }).catch(() => {});
+}
+function inRound(p) { return meta && p.r === meta.round; }
+const alive = () => [...players.values()].filter(p => inRound(p) && !p.out);
+function attack(n) {
+  if (G.mode !== 'battle' || !net) return;
+  const foes = [...players.entries()].filter(([id, p]) => id !== uid && inRound(p) && !p.out);
+  if (!foes.length) return;
+  const [to] = foes[Math.floor(Math.random() * foes.length)];
+  D.push(D.ref(rdb, 'blok/' + M + '/g/' + to), { by: uid, n: Math.min(10, n), r: meta.round }).catch(() => {});
+}
+function onGarbage(snap) {
+  const v = snap.val(); D.remove(snap.ref).catch(() => {});
+  if (!v || G.mode !== 'battle' || G.over || !meta || v.r !== meta.round) return;
+  G.garbage.push(Math.max(1, Math.min(10, v.n | 0))); flash('+' + v.n + ' хог мөр ирлээ!');
+}
+function battleOut() {
+  myPlace = Math.max(1, alive().filter(p => p !== players.get(uid)).length + 1);
+  publish(true);
+  showCard(el('h2', '', 'Та унлаа'), el('div', 'big', myPlace + '-р байр'), el('p', '', 'Бусдын тоглолтыг үзэж байна…'));
+}
+function battleTick() {
+  // the last one standing wins
+  if (!meta || ended === meta.round || G.over) return;
+  const others = [...players.entries()].filter(([id, p]) => id !== uid && inRound(p));
+  if (others.length && others.every(([, p]) => p.out) && performance.now() - G.t0 > 3000) { ended = meta.round; myPlace = 1; G.over = true; publish(true); sfx('win'); showWin(uid); }
+}
+function showWin(id) {
+  const name = id === uid ? 'Та' : (players.get(id) && players.get(id).n) || 'Тоглогч';
+  const nodes = [el('h2', '', id === uid ? 'Та яллаа!' : name + ' яллаа'), el('div', 'big', '🏆'), el('p', '', (id === uid ? 'Та' : name) + ' хамгийн сүүлд үлдлээ.')];
+  if (canStart) nodes.push(el('div', 'row')), nodes[nodes.length - 1].append(btn('Дахин тулалдах', 'btn', startRound));
+  else nodes.push(el('p', '', CODE ? 'Өрөө нээсэн хүн дараагийн тулааныг эхлүүлнэ.' : 'Дахин эхлүүлэхийг хүлээж байна.'));
+  showCard(...nodes);
+}
+function onPlayers() {
+  paintOpps();
+  if (!meta || G.mode !== 'battle') return;
+  // somebody else is the last one standing
+  if (G.over && ended !== meta.round) {
+    const live = alive();
+    if (live.length === 1 && [...players.values()].filter(inRound).length > 1) { ended = meta.round; const id = [...players.entries()].find(([, p]) => p === live[0])[0]; showWin(id); }
+  }
+}
+function paintOpps() {
+  const box = $('#opps'); box.replaceChildren();
+  const list = [...players.entries()].filter(([, p]) => !meta || inRound(p) || !p.r).sort((a, b) => (a[1].out ? 1 : 0) - (b[1].out ? 1 : 0));
+  $('#oppTitle').textContent = 'Тоглогчид: ' + list.length;
+  for (const [id, p] of list.slice(0, innerWidth <= 720 ? 4 : 12)) {
+    const d = el('div', 'opp' + (p.out && p.pl !== 1 ? ' out' : '') + (id === uid ? ' me' : '')), cv = el('canvas'); cv.width = 50; cv.height = 100;
+    const c = cv.getContext('2d'), s = typeof p.b === 'string' && p.b.length === BOARD_LEN ? p.b : '';
+    for (let i = 0; i < s.length; i++) { const v = +s[i]; if (v) { c.fillStyle = COLORS[v] || '#888'; c.fillRect((i % W) * 5, Math.floor(i / W) * 5, 5, 5); } }
+    d.append(cv, el('span', 'nm', (id === uid ? 'Та' : String(p.n || 'Тоглогч').slice(0, 24)) + (p.out && p.pl ? ' · ' + p.pl : '')));
+    box.append(d);
+  }
+}
+function battleLobby() {
+  const nodes = [el('h2', '', 'Тулаан'), el('p', '', '2 ба түүнээс дээш мөр зэрэг арилгавал өрсөлдөгч рүү хог мөр илгээнэ. Хамгийн сүүлд үлдсэн нь ялна.')];
+  if (!CFG) nodes.push(el('p', '', 'Тулаан зөвхөн онлайн хувилбарт ажиллана.'));
+  else if (!net) nodes.push(el('p', '', 'Сервертэй холбогдож байна…'));
+  else {
+    nodes.push(el('p', '', (CODE ? 'Өрөө ' + CODE : 'Нийтийн тулаан') + ' · Одоо энд ' + players.size + ' хүн'));
+    if (canStart) { nodes.push(el('div', 'row')); nodes[nodes.length - 1].append(btn('Тулаан эхлүүлэх', 'btn', startRound)); }
+    else nodes.push(el('p', '', CODE ? 'Өрөө нээсэн хүн тулааныг эхлүүлнэ.' : 'Хэн нэг нь эхлүүлэхийг хүлээж байна.'));
+  }
+  nodes.push(help());
+  showCard(...nodes);
+}
+async function startRound() {
+  if (!net) return;
+  const t = now();
+  try { await D.set(R('meta'), { by: uid, round: rid(), seed: Math.floor(Math.random() * 2 ** 31), start: t + 3500, at: t }); }
+  catch { flash(CODE ? 'Тулааныг өрөө нээсэн хүн л эхлүүлнэ.' : 'Өөр хүний эхлүүлсэн тулаан явагдаж байна. Хэдэн минутын дараа дахин оролдоорой.'); }
+}
+let cdTimer = 0;
+function onMeta(v) {
+  const prev = meta && meta.round;
+  meta = v && typeof v.round === 'string' ? v : null;
+  if (!meta || meta.round === prev || mode !== 'battle') { if (mode === 'battle' && G.over) battleLobbyIfIdle(); return; }
+  // a new round: count down to its start, then everyone gets the same pieces
+  clearInterval(cdTimer); myPlace = 0; ended = ''; G.over = true;
+  const tick = () => {
+    const left = meta.start - now();
+    if (left > 0) { showCard(el('h2', '', 'Бэлдээрэй!'), el('div', 'big', String(Math.ceil(left / 1000)))); return; }
+    clearInterval(cdTimer); G.round = meta.round; G.startLevel = 3; startGame('battle', meta.seed); flash('Эхэллээ!');
+  };
+  if (meta.start - now() < -20000) return;   // an old round: just watch
+  tick(); cdTimer = setInterval(tick, 200);
+}
+function battleLobbyIfIdle() { if (ov.hidden === false && card.querySelector('.big')) return; battleLobby(); }
+
+/* ---------- start ---------- */
+async function connect() {
+  const [A, U, Dm] = await Promise.all(['app', 'auth', 'database'].map(m => import(SDK + 'firebase-' + m + '.js')));
+  const app = A.initializeApp(CFG), cred = await U.signInAnonymously(U.getAuth(app));
+  D = Dm; rdb = D.getDatabase(app); uid = cred.user.uid; net = true;
+  D.onValue(D.ref(rdb, '.info/serverTimeOffset'), s => { offset = Number(s.val()) || 0; }, () => {});
+  if (myName) D.set(D.ref(rdb, 'names/' + uid), myName).catch(() => {});
+  if (CODE) for (const b of ['arena/', 'openarena/']) {
+    try { const s = await D.get(D.ref(rdb, b + CODE + '/by')); if (s.exists()) { roomBase = b + CODE; canStart = s.val() === uid; D.onValue(D.ref(rdb, roomBase), x => { room = x.val(); }, () => {}); break; } } catch {}
+  } else canStart = true;
+  // be listed in the battle as soon as the page is open
+  D.onDisconnect(R('p/' + uid)).remove().catch(() => {});
+  D.set(R('p/' + uid), { n: myName || 'Тоглогч', b: '0'.repeat(BOARD_LEN), sc: 0, out: true, pl: 0, r: '', at: now() }).catch(() => {});
+  D.onChildAdded(R('p'), s => { players.set(s.key, s.val()); onPlayers(); if (mode === 'battle' && G.over && !ov.hidden) battleLobbyIfIdle(); });
+  D.onChildChanged(R('p'), s => { players.set(s.key, s.val()); onPlayers(); });
+  D.onChildRemoved(R('p'), s => { players.delete(s.key); onPlayers(); });
+  D.onChildAdded(D.ref(rdb, 'blok/' + M + '/g/' + uid), onGarbage);
+  D.onValue(R('meta'), s => onMeta(s.val()));
+  try { best = Math.max(best, Number((await D.get(D.ref(rdb, 'scores/' + uid + '/blok/best'))).val()) || 0); } catch {}
+  lobby();
+}
+paintModes(); paintSide(); lobby();
+if (CFG) connect().catch(() => { flash('Сервертэй холбогдож чадсангүй.'); });
+</script>
+</body>
+</html>

@@ -17,7 +17,7 @@ if (-not $css -or -not $js -or $to -le $from) { throw 'master layout not recogni
 $markup = $t.Substring($from, $to - $from).Trim()
 
 $icon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23E8780A'/%3E%3Ctext x='32' y='45' font-size='36' text-anchor='middle' font-family='Arial' font-weight='700' fill='%2317202B'%3E%D0%A6%3C/text%3E%3C/svg%3E"
-$desc = 'Завсарлагын богино тоглоомууд: Болжмор, Карьерын зам, Таавар 3×3, Мэдлэгийн сорил, Шатар.'
+$desc = 'Завсарлагын богино тоглоомууд: Болжмор, Карьерын зам, Таавар 3×3, Мэдлэгийн сорил, Шатар, Буудлага, Блок тулаан, CS2 академи.'
 
 # file -> start game (data-start), page title
 $pages = [ordered]@{
@@ -58,7 +58,7 @@ $markup
 New-Item -ItemType Directory -Force $Out | Out-Null
 $changed = @()
 # stand-alone pages copied as they are (the 3D shooter loads three.js and Firebase itself)
-foreach ($page in @('buudlaga.html')) {
+foreach ($page in @('buudlaga.html', 'cs2.html', 'blok.html')) {
   $files[$page] = [IO.File]::ReadAllText((Join-Path $PSScriptRoot $page), [Text.Encoding]::UTF8)
 }
 # Firebase web config is hand-edited (pasted from the Firebase console); only create the empty stub

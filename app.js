@@ -15,8 +15,11 @@ const GAMES = {
   quiz:   { name: 'Мэдлэгийн сорил', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: 'Оноо' },
   chess:  { name: 'Шатар', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: 'Нүүдэл' },   // running total of wins vs the computer
   fps:    { name: 'Буудлага', better: 'high', fmt: v => fmtInt(v) + ' онолт', hud: '' },     // most hits-out in one match; the game itself is buudlaga.html
+  cs2:    { name: 'CS2 академи', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: '' },  // best quiz score; the page is cs2.html
+  blok:   { name: 'Блок тулаан', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: '' },  // best solo score; the page is blok.html
 };
-const WHERE = { hub: 'Нүүр', flappy: 'Болжмор', race: 'Карьерын зам', puzzle: 'Таавар', quiz: 'Сорил', live: 'Хамтдаа сорил', chess: 'Шатар', fps: 'Буудлага' };
+const WHERE = { hub: 'Нүүр', flappy: 'Болжмор', race: 'Карьерын зам', puzzle: 'Таавар', quiz: 'Сорил', live: 'Хамтдаа сорил', chess: 'Шатар', fps: 'Буудлага', cs2: 'CS2 академи', blok: 'Блок тулаан' };
+const PAGES = { fps: 'buudlaga.html', cs2: 'cs2.html', blok: 'blok.html' };   // games that are pages of their own on the link version
 const isBetter = (g, a, b) => b == null || (GAMES[g].better === 'high' ? a > b : a < b);
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
 const dayOf = ms => { const d = new Date(ms); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
@@ -122,8 +125,10 @@ async function renderBoard() {
     const li = el('li'); if (r.uid === me.uid || r.local) li.classList.add('me');
     li.append(el('span', 'rk', String(i + 1)));
     const p = r.local ? null : ps[r.uid];
-    if (p && p.avatarUrl) { const im = el('img'); im.src = p.avatarUrl; im.alt = ''; li.append(im); } else li.append(el('span', 'av'));
-    const nm = el('span', 'nm', r.local ? 'Та (энэ төхөөрөмж)' : (p && p.name) || (r.uid === me.uid ? (me.name || 'Та') : 'Хамт олны гишүүн'));
+    const who = r.local ? myName() || 'Та' : (p && p.name) || (r.uid === me.uid ? (me.name || 'Та') : 'Хамт олны гишүүн');
+    li.append(face(r.uid, who, p && p.avatarUrl));
+    if (!r.local) { li.dataset.uid = r.uid; li.onclick = () => showProfile(r.uid); }
+    const nm = el('span', 'nm', r.local ? 'Та (энэ төхөөрөмж)' : who);
     if (r.at && dayOf(r.at) === td) nm.append(el('small', '', 'өнөөдөр'));
     li.append(nm);
     li.append(el('span', 'sc num', GAMES[tab].fmt(r.best)));
@@ -164,10 +169,10 @@ async function renderOnline() {
   faces.replaceChildren();
   const titles = [];
   for (const p of arr.slice(0, 6)) {
-    const pr = p.by && ps[p.by];
-    if (pr && pr.avatarUrl) { const im = el('img'); im.src = pr.avatarUrl; im.alt = ''; faces.append(im); } else faces.append(el('span'));
+    const pr = p.by && ps[p.by], nm = (pr && pr.name) || (p.isMe ? 'Та' : 'Хамт олны гишүүн');
+    faces.append(face(p.by, nm, pr && pr.avatarUrl));
     const w = WHERE[p.presence && p.presence.where] || 'Нүүр';
-    titles.push(((pr && pr.name) || (p.isMe ? 'Та' : 'Хамт олны гишүүн')) + ' — ' + w);
+    titles.push(nm + ' — ' + w);
   }
   box.title = titles.length ? titles.join('\n') : 'Энэ хуудсыг яг одоо нээсэн хүмүүс';
 }
@@ -271,19 +276,184 @@ function use(name) {
   try { return Promise.resolve(window.claude.use(name)); } catch { return Promise.resolve(null); }
 }
 
-/* name for the link version (no accounts): kept on this device, published as names/<uid> */
-function paintNameBtn() { const b = $('#nameBtn'); b.hidden = !FB; b.textContent = 'Нэр: ' + (myName() || '—'); }
+/* ---------- profile: picture and chosen details. prof/<uid> {e,c,g,s,w,p} is small and loaded for everyone;
+   pics/<uid> {d: jpeg data URL, at} is fetched per person when prof.p (the picture's time) changes.
+   Edits are kept on this device first (tsai:prof, tsai:pic, tsai:profDirty) and pushed once db and the id are there. */
+const PF_EMO = ['😀', '😎', '🤓', '🦊', '🐼', '🐯', '🦁', '🐺', '🦅', '🐉', '🚀', '⚽', '♟️', '🎯', '🔥', '⭐'];
+const PF_COL = ['#E8780A', '#D03C3C', '#C2417F', '#7B4FD0', '#2F6FD0', '#1C9A9A', '#1C9553', '#6B7785'];
+const PF_STAT = ['Тэмцээнд бэлэн 🏆', 'Шатраар уралдъя ♟️', 'Багаараа тоглоё 🤝', 'Аварга болно 💪', 'Шинэ тоглогч 🌱', 'Зүгээр сонирхож байна 👀'];
+const PF_TIME = ['Өглөө', 'Өдрийн цайны цаг', 'Орой', 'Шөнө', 'Хэзээ ч'];
+const PIC_RE = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]{100,24000}$/;
+const pfInt = (v, hi) => (Number.isInteger(v) && v >= -1 && v <= hi ? v : -1);
+const pfGames = () => Object.keys(GAMES).filter(g => !(inClaude && PAGES[g]));
+function profClean(x) {
+  x = x || {};
+  return { e: pfInt(x.e, PF_EMO.length - 1), c: pfInt(x.c, PF_COL.length - 1), g: typeof x.g === 'string' && GAMES[x.g] ? x.g : '',
+    s: pfInt(x.s, PF_STAT.length - 1), w: pfInt(x.w, PF_TIME.length - 1), p: Number.isFinite(x.p) && x.p > 0 ? x.p : 0 };
+}
+let profs = new Map();          // uid -> clean prof
+const pics = new Map();         // uid -> { p, url }
+let pfT = 0;
+function profRepaint() { clearTimeout(pfT); pfT = setTimeout(() => { renderBoard(); renderOnline(); paintNameBtn(); }, 60); }
+function picUrl(uid, p) {
+  const c = pics.get(uid);
+  if (c && c.p === p) return c.url;
+  if (!db) return '';
+  pics.set(uid, { p, url: '' });
+  db.doc('pics/' + uid).get().then(s => {
+    const d = s.exists ? s.data() : null, url = d && typeof d.d === 'string' && PIC_RE.test(d.d) ? d.d : '';
+    pics.set(uid, { p, url }); if (url) profRepaint();
+  }).catch(() => {});
+  return '';
+}
+const myProf = () => (LS.get('profDirty', false) || !profs.has(me.uid) ? profClean(LS.get('prof', null)) : profs.get(me.uid));
+function face(uid, name, acct, big) {
+  const mine = uid === 'local' || (!!uid && uid === me.uid), pend = mine ? LS.get('pic', null) : null;
+  const pr = mine ? myProf() : profs.get(uid) || profClean();
+  const pic = pend !== null ? pend : pr.p && uid !== 'local' ? picUrl(uid, pr.p) : '';
+  return faceOf(pr, pic, name, mine ? acct || me.avatar : acct, big);
+}
+function faceOf(pr, pic, name, acct, big) {
+  const url = (pic && PIC_RE.test(pic) ? pic : '') || (pr.e < 0 ? acct || '' : ''), col = PF_COL[pr.c];
+  let n;
+  if (url) { n = el('img', 'face'); n.src = url; n.alt = ''; }
+  else if (PF_EMO[pr.e]) { n = el('span', 'face emo', PF_EMO[pr.e]); n.style.background = col ? 'color-mix(in srgb,' + col + ' 30%,var(--surface))' : 'var(--sunk)'; }
+  else { n = el('span', 'face', (Array.from(String(name || '').trim())[0] || '?').toUpperCase()); n.style.background = col || '#8A97A6'; }
+  if (big) n.classList.add('big');
+  if (col) n.style.setProperty('--ring', col);
+  n.setAttribute('aria-hidden', 'true');
+  return n;
+}
+function profStart() {
+  db.collection('prof').onSnapshot(snap => {
+    profs = new Map(snap.docs.map(x => [x.id, profClean(x.data())]));
+    profRepaint();
+  }, () => {});
+  profPush();
+}
+let profBusy = false;
+async function profPush() {
+  if (!db || !me.uid || !canWrite || profBusy || !LS.get('profDirty', false)) return;
+  profBusy = true;
+  try {
+    const pr = profClean(LS.get('prof', null)), pend = LS.get('pic', null);
+    const old = await db.doc('prof/' + me.uid).get();
+    pr.p = old.exists ? profClean(old.data()).p : 0;
+    if (pend !== null) {
+      if (pend && PIC_RE.test(pend)) { const at = Math.floor(srvNow()); await db.doc('pics/' + me.uid).set({ d: pend, at }); pr.p = at; pics.set(me.uid, { p: at, url: pend }); }
+      else { if (pr.p) await db.doc('pics/' + me.uid).delete().catch(() => {}); pr.p = 0; }
+    }
+    await db.doc('prof/' + me.uid).set(pr);
+    LS.set('prof', pr); LS.set('pic', null); LS.set('profDirty', false);
+    profs.set(me.uid, pr); profRepaint();
+  } catch (e) { console.warn('profile:', e); } finally { profBusy = false; }
+}
+async function picFromFile(file) {
+  if (!file || !/^image\//.test(file.type)) throw new Error('type');
+  const src = URL.createObjectURL(file);
+  try {
+    const im = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = src; });
+    const w = im.naturalWidth, h = im.naturalHeight, s = Math.min(w, h);
+    if (!s) throw new Error('size');
+    for (const [px, q] of [[128, 0.82], [112, 0.72], [96, 0.6]]) {   // a square from the middle, small enough for the rules (≤ 24 000 chars)
+      const c = document.createElement('canvas'); c.width = c.height = px;
+      const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, px, px);
+      x.drawImage(im, (w - s) / 2, (h - s) / 2, s, s, 0, 0, px, px);
+      const d = c.toDataURL('image/jpeg', q);
+      if (PIC_RE.test(d)) return d;
+    }
+    throw new Error('big');
+  } finally { URL.revokeObjectURL(src); }
+}
+async function showProfile(uid) {
+  sfx('tick');
+  let ps = {}; try { if (user) ps = await user.profiles([uid]); } catch {}
+  const p = ps[uid] || {}, mine = uid === me.uid;
+  const name = mine ? me.name || myName() || 'Та' : p.name || 'Хамт олны гишүүн';
+  const pr = mine ? myProf() : profs.get(uid) || profClean();
+  const body = $('#pfBody'); body.replaceChildren(face(uid, name, p.avatarUrl, true), el('h3', '', name));
+  if (PF_STAT[pr.s]) body.append(el('p', 'pfstat', PF_STAT[pr.s]));
+  const dl = el('dl', 'pffacts');
+  const fact = (k, v) => dl.append(el('dt', '', k), el('dd', '', v));
+  if (GAMES[pr.g]) fact('Дуртай тоглоом', GAMES[pr.g].name);
+  if (PF_TIME[pr.w]) fact('Тоглодог цаг', PF_TIME[pr.w]);
+  const sc = scores.get(uid) || {};
+  for (const g of pfGames()) {
+    const s = sc[g]; if (!s || typeof s.best !== 'number') continue;
+    const rk = rankOf(g, uid); fact(GAMES[g].name, GAMES[g].fmt(s.best) + (rk ? ' · ' + rk.pos + '-р байр' : ''));
+  }
+  if (dl.children.length) body.append(dl); else body.append(el('p', '', 'Одоогоор онооны самбарт амжилт алга.'));
+  const btns = el('div', 'btns');
+  if (mine && online) { const b = el('button', 'btn', 'Засах'); b.type = 'button'; b.onclick = () => { $('#pfView').hidden = true; askName(false); }; btns.append(b); }
+  const x = el('button', 'btn ghost', 'Хаах'); x.type = 'button'; x.onclick = () => { $('#pfView').hidden = true; }; btns.append(x);
+  body.append(btns);
+  $('#pfView').hidden = false;
+}
+$('#pfView').onclick = e => { if (e.target.id === 'pfView') e.currentTarget.hidden = true; };
+
+/* the name (link version, kept on this device, published as names/<uid>) and the profile are edited in one dialog */
+function paintNameBtn() {
+  const b = $('#nameBtn'); b.hidden = !online;
+  const nm = FB ? myName() : me.name;
+  b.replaceChildren(face(me.uid || 'local', nm, me.avatar), el('span', '', FB ? nm || 'Нэр' : 'Профайл'));
+}
 function askName(first) {
   return new Promise(res => {
-    const dlg = $('#nameDlg'), inp = $('#nameIn');
-    inp.value = myName(); $('#nameX').hidden = !!first; dlg.hidden = false;
-    setTimeout(() => inp.focus(), 50);
+    const dlg = $('#nameDlg'), inp = $('#nameIn'), err = $('#pfErr');
+    const cur = { ...myProf() };
+    let pic;   // undefined = keep, '' = remove, data URL = new
+    const shownPic = () => (pic !== undefined ? pic : LS.get('pic', null) !== null ? LS.get('pic', '') : me.uid && cur.p ? picUrl(me.uid, cur.p) : '');
+    inp.value = myName(); $('#pfNameF').hidden = !FB; $('#nameX').hidden = !!first; err.textContent = '';
+    $('#pfTitle').textContent = first ? 'Тавтай морил!' : 'Профайл';
+    $('#pfLead').textContent = FB
+      ? 'Нэрээ бичээрэй. Зураг, бусад нь заавал биш. Онооны самбар, өрөөнд ингэж харагдана, энэ төхөөрөмж санана.'
+      : 'Зураг болон бусад мэдээллээ сонгоорой. Онооны самбар, өрөөнд ингэж харагдана.';
+    const opts = (box, list, key, label) => {
+      box.replaceChildren();
+      list.forEach((v, i) => {
+        const b = el('button', '', label ? label(v, i) : v); b.type = 'button';
+        const val = typeof v === 'string' && key === 'g' ? v : i;
+        b.setAttribute('aria-pressed', String(cur[key] === val));
+        b.onclick = () => { cur[key] = cur[key] === val ? (key === 'g' ? '' : -1) : val; paint(); };
+        box.append(b);
+      });
+    };
+    const paint = () => {
+      const nm = (FB ? inp.value.trim() : me.name) || '?', f = faceOf(cur, shownPic(), nm, me.avatar, true);
+      f.id = 'pfFace'; $('#pfFace').replaceWith(f);
+      $('#pfNoPic').hidden = !shownPic();
+      const emo = $('#pfEmo'); opts(emo, PF_EMO, 'e');
+      const ini = el('button', 'ini', (Array.from(nm)[0] || '?').toUpperCase()); ini.type = 'button'; ini.title = 'Нэрийн эхний үсэг';
+      ini.setAttribute('aria-pressed', String(cur.e < 0)); ini.onclick = () => { cur.e = -1; paint(); }; emo.prepend(ini);
+      const col = $('#pfCol'); opts(col, PF_COL, 'c', () => '');
+      [...col.children].forEach((b, i) => { b.style.setProperty('--c', PF_COL[i]); b.setAttribute('aria-label', 'Өнгө ' + (i + 1)); });
+      opts($('#pfGame'), pfGames(), 'g', g => GAMES[g].name);
+      opts($('#pfStat'), PF_STAT, 's');
+      opts($('#pfTime'), PF_TIME, 'w');
+    };
+    paint(); dlg.hidden = false;
+    if (FB) setTimeout(() => inp.focus(), 50);
+    inp.oninput = () => paint();
+    $('#pfPick').onclick = () => $('#pfFile').click();
+    $('#pfFile').onchange = async e => {
+      const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return;
+      err.textContent = 'Зургийг бэлдэж байна…';
+      try { pic = await picFromFile(f); err.textContent = ''; } catch { err.textContent = 'Энэ зургийг уншиж чадсангүй. Өөр зураг сонгоорой.'; }
+      paint();
+    };
+    $('#pfNoPic').onclick = () => { pic = ''; paint(); };
     const done = () => {
       const n = inp.value.trim().replace(/\s+/g, ' ').slice(0, 24);
-      if (!n) { inp.focus(); return; }
-      LS.set('nick', n); nameMem = n; me.name = n; dlg.hidden = true;
-      if (FB) fbInit().then(F => F.D.set(F.D.ref(F.rdb, 'names/' + F.uid), n)).catch(() => {});
-      paintNameBtn(); renderBoard(); arenaRender(); res(n);
+      if (FB && !n) { err.textContent = 'Нэрээ бичээрэй.'; inp.focus(); return; }
+      if (inClaude && !canWrite) { err.textContent = 'Таны эрх зөвхөн үзэх тул профайл хадгалагдахгүй. Эзэмшигчээс Contributor эрх аваарай.'; return; }
+      LS.set('prof', profClean(cur)); LS.set('profDirty', true);
+      if (pic !== undefined) LS.set('pic', pic);
+      if (FB) {
+        LS.set('nick', n); nameMem = n; me.name = n;
+        fbInit().then(F => F.D.set(F.D.ref(F.rdb, 'names/' + F.uid), n)).catch(() => {});
+      }
+      dlg.hidden = true; sfx('good');
+      paintNameBtn(); renderBoard(); renderOnline(); arenaRender(); profPush(); res(n || me.name);
     };
     $('#nameOk').onclick = done;
     inp.onkeydown = e => { if (e.key === 'Enter') done(); };
@@ -293,10 +463,11 @@ function askName(first) {
 $('#nameBtn').onclick = () => { sfx('tick'); askName(false); };
 
 async function boot() {
-  if (inClaude) for (const x of $$('[data-open="fps"], #tabs [data-tab="fps"]')) x.style.display = 'none';   // the shooter lives on the link version only
+  if (inClaude) for (const x of $$('[data-open="fps"], #tabs [data-tab="fps"], [data-open="cs2"], #tabs [data-tab="cs2"], [data-open="blok"], #tabs [data-tab="blok"]')) x.style.display = 'none';   // these pages live on the link version only
   renderBoard(); paintBests(); renderOnline(); arenaRender();
   if (!online) { dbState = 'off'; $('#liveFoot').textContent = 'Зөвхөн онлайн хувилбарт ажиллана'; renderBoard(); autoStart(); return; }
-  if (FB) { if (!myName()) await askName(true); paintNameBtn(); }
+  if (FB && !myName()) await askName(true);
+  paintNameBtn();
   autoStart();
   use('user').then(async u => {
     user = u;
@@ -305,14 +476,14 @@ async function boot() {
       me.uid = m.id; me.name = m.name; me.avatar = m.avatarUrl; me.color = m.color;
       const cw = await u.can('data.write'); if (cw === false) canWrite = false;
     }
-    renderBoard(); paintBests(); renderOnline(); chRefresh(); arenaRender(); invListen(); noteAdminCheck();
+    renderBoard(); paintBests(); renderOnline(); paintNameBtn(); profPush(); chRefresh(); arenaRender(); invListen(); noteAdminCheck();
   }).catch(() => {});
   use('db').then(d => {
     db = d;
-    if (!d) { dbState = 'off'; renderBoard(); chRefresh(); arenaRender(); notesRender(); return; }
+    if (!d) { dbState = 'off'; renderBoard(); chRefresh(); arenaRender(); notesRender(); adsRender(); return; }
     dbState = 'on';
     if (!chessv.hidden && chCfg.mode === 'tour') chTourList();
-    chRefresh(); invListen(); notesStart();
+    chRefresh(); invListen(); notesStart(); adsStart(); profStart();
     const code = (location.hash.match(/(?:^#|&)r=([A-Za-z0-9]{4,6})/) || [])[1] || LS.get('arena', '');
     if (code) arenaEnter(code); else arenaRender();
     const tcode = (location.hash.match(/(?:^#|&)t=([A-Za-z0-9]{4,6})/) || [])[1];   // link to a coded tournament
@@ -336,7 +507,10 @@ async function boot() {
 /* ---------- Өрөө: a room for timed contests among teammates.
    Coded rooms live in arena/<CODE> (readable only with the code), open ones in openarena/<CODE> (listed);
    members of an open room keep openlive/<CODE>_<uid> fresh so empty rooms drop off the list. ---------- */
-const ARENA_GAMES = ['flappy', 'race', 'puzzle', 'quiz'], ARENA_MINS = [3, 5, 10, 15, 30], LIVE_MS = 3 * 60000, DAY = 86400000;
+// timed room contests: the arcade games here, plus the CS2 academy quiz (its own page reports to the room) on the link version
+const ARENA_GAMES = inClaude ? ['flappy', 'race', 'puzzle', 'quiz'] : ['flappy', 'race', 'puzzle', 'quiz', 'blok', 'cs2'];
+const ARENA_MINS = [3, 5, 10, 15, 30], LIVE_MS = 3 * 60000, DAY = 86400000;
+const ARENA_LABEL = { cs2: 'CS2 сорил', blok: 'Блок (ганцаараа)' };
 let arenaCode = '', arenaDoc = null, arenaScores = new Map(), arenaOffs = [], arenaRoom = null, arenaPeers = [], arenaErr = '', arenaJoining = 0, arenaDraft = '';
 let arenaBase = '', arenaOpen = false, arenaMaking = false, arenaKind = LS.get('arenaKind', 'open') === 'code' ? 'code' : 'open';
 let openRooms = [], openLive = [], openOffs = [], openCleanAt = 0;
@@ -510,7 +684,7 @@ function arenaRender() {
     if (!live.length) box.append(el('p', 'note', dbState === 'wait' ? 'Холбогдож байна…' : 'Одоогоор нээлттэй өрөө алга.'));
     for (const { r, n } of live.slice(0, 12)) {
       const now = Date.now(), g = GAMES[r.game] ? r.game : 'flappy';
-      const st = r.round && now < r.ends ? GAMES[g].name + ', ' + mmss(r.ends - now) + ' үлдсэн' : r.round ? GAMES[g].name + ', тэмцээн дууссан' : 'Тэмцээн эхлээгүй';
+      const st = r.round && now < r.ends ? (ARENA_LABEL[g] || GAMES[g].name) + ', ' + mmss(r.ends - now) + ' үлдсэн' : r.round ? (ARENA_LABEL[g] || GAMES[g].name) + ', тэмцээн дууссан' : 'Тэмцээн эхлээгүй';
       box.append(chRow(nameOf(r.by) + '-ийн өрөө', st + ' · ' + n + ' хүн', chBtn('Орох', 'btn', () => { sfx('tick'); arenaEnter(r.code); })));
     }
     const row = el('div', 'field'), inp = el('input');
@@ -545,10 +719,10 @@ function arenaRender() {
       const now = Date.now(), org = d.by === me.uid, g = GAMES[d.game] ? d.game : 'flappy';
       const running = !!d.round && now < d.ends, ended = !!d.round && now >= d.ends;
       if (running) {
-        const st = el('div', 'arstat'); st.append(el('b', '', GAMES[g].name), el('span', 'clock', mmss(d.ends - now) + ' үлдсэн'));
+        const st = el('div', 'arstat'); st.append(el('b', '', (ARENA_LABEL[g] || GAMES[g].name)), el('span', 'clock', mmss(d.ends - now) + ' үлдсэн'));
         box.append(st, chBtns(chBtn('Тоглох →', 'btn', () => openAny(g)), org ? chBtn('Зогсоох', 'btn ghost', arenaStop) : null));
       } else if (ended) {
-        const st = el('div', 'arstat'); st.append(el('b', '', GAMES[g].name + ': тэмцээн дууслаа')); box.append(st);
+        const st = el('div', 'arstat'); st.append(el('b', '', (ARENA_LABEL[g] || GAMES[g].name) + ': тэмцээн дууслаа')); box.append(st);
       } else box.append(el('p', 'note', org ? 'Тоглоом, хугацаагаа сонгоод тэмцээнээ эхлүүлээрэй.' : 'Тэмцээн эхлээгүй байна. Өрөө нээсэн ' + nameOf(d.by) + ' эхлүүлнэ.'));
       const rows = arenaRows();
       if (rows.length) {
@@ -562,12 +736,20 @@ function arenaRender() {
         box.append(ol);
       } else if (running) box.append(el('p', 'note', 'Одоогоор оноо алга. Түрүүлж тоглоорой!'));
       if (org && !running) {
-        box.append(el('span', 'seglbl', 'Тоглоом'), arenaSeg(ARENA_GAMES.map(x => [GAMES[x].name, x]), arenaPick.game, v => { arenaPick.game = v; }));
+        box.append(el('span', 'seglbl', 'Тоглоом'), arenaSeg(ARENA_GAMES.map(x => [ARENA_LABEL[x] || GAMES[x].name, x]), arenaPick.game, v => { arenaPick.game = v; }));
         box.append(el('span', 'seglbl', 'Хугацаа'), arenaSeg(ARENA_MINS.map(m => [m + ' мин', m]), arenaPick.mins, v => { arenaPick.mins = v; }));
         box.append(chBtns(chBtn(ended ? 'Шинэ тойрог эхлүүлэх' : 'Тэмцээн эхлүүлэх', 'btn', arenaStart)));
       }
-      box.append(el('span', 'seglbl', 'Өрөөнийхөнтэйгээ'), chBtns(chBtn('Хамтдаа сорил', 'btn ghost', () => openAny('live')), chBtn('Шатар', 'btn ghost', () => openAny('chess')),
-        inClaude ? null : chBtn('Буудлага', 'btn ghost', () => openAny('fps'))));
+      // every game from inside the room: the together games open the room's own match, the others count for a running contest in them
+      const all = [['live', 'Хамтдаа сорил'], ['chess', 'Шатар'], ['fps', 'Буудлага'], ['blok', 'Блок тулаан'], ['flappy', 'Болжмор'], ['race', 'Карьерын зам'], ['puzzle', 'Таавар 3×3'], ['quiz', 'Мэдлэгийн сорил'], ['cs2', 'CS2 академи']]
+        .filter(([k]) => !(inClaude && PAGES[k]));
+      const row = chBtns(...all.map(([k, label]) => {
+        const b = chBtn(label, running && k === g ? 'btn' : 'btn ghost', () => openAny(k));
+        if (running && k === g) b.title = 'Одоо энэ тоглоомоор тэмцээн явагдаж байна';
+        return b;
+      }));
+      box.append(el('span', 'seglbl', 'Өрөөнийхөнтэйгээ тоглох'), row,
+        el('p', 'note', 'Хамтдаа сорил, Шатар, Буудлага, Блокийн тулаан нь зөвхөн энэ өрөөний хүмүүстэй тоглогдоно. Бусад тоглоомд тэмцээн явагдаж байвал оноо тань өрөөний жагсаалтад орно.'));
     }
   }
   if (arenaErr) box.append(el('p', 'note bad', arenaErr));
@@ -581,15 +763,18 @@ setInterval(() => {
   else if (c || left > -2500) arenaRender();
 }, 1000);
 
-/* ---------- Хэлэх үг: anonymous notes to the team, db notes/<random id> = {t, to?, d: UTC day, s: order, f: reports}.
-   A note never stores who wrote it. Firebase rules: 5 notes a day per person (notelimit/<uid> keeps only day + count),
-   one report per person (noterep/<id>/<uid>, unreadable), delete / un-hide only for a device that entered the board code
-   (noteadmin/pin, typed in the Firebase console). In the Artifact the owner and editors are the admins. ---------- */
+/* ---------- Хэлэх үг: anonymous notes to the team. A new note waits in notesq/<random id> = {t, to?, d} until the board admin
+   approves it into notes/<id> = {t, to?, d: Ulaanbaatar day, s: order, f: reports}. Nothing stores who wrote it.
+   Firebase rules: the queue is readable only by the admin, 5 notes a day per person (notelimit/<uid> keeps only day + count),
+   one report per person (noterep/<id>/<uid>, unreadable); approve / delete / un-hide only for a device that entered the
+   board code (noteadmin/pin, typed in the Firebase console). In the Artifact the owner and editors are the admins. ---------- */
 const NOTE_MAX = 280, NOTE_TO = 30, NOTE_DAY = 5, NOTE_HIDE = 3;
 let notes = [], notesOff = null, noteAdmin = false, noteMsg = '', noteBusy = false, noteAsk = false;
+let queue = [], queueOff = null;
 const noteDraft = { t: '', to: '', code: '' };
 let noteRep = new Set((LS.get('noterep', []) || []).filter(x => typeof x === 'string'));
-const noteDay = () => Math.floor(srvNow() / DAY) * DAY;
+const UB = 8 * 3600e3;   // Ulaanbaatar is UTC+8 all year: notes are dated and limited by the local day
+const noteDay = () => Math.floor((srvNow() + UB) / DAY) * DAY - UB;
 function notesStart() {
   if (notesOff || !db) return;
   notesOff = db.collection('notes').onSnapshot(s => {
@@ -605,6 +790,37 @@ async function noteAdminCheck() {
   } else if (FB) {
     try { const F = await fbInit(); noteAdmin = (await F.D.get(F.D.ref(F.rdb, 'noteadmins/' + F.uid))).exists(); } catch { noteAdmin = false; }
   }
+  queueWatch(); notesRender(); adsRender();
+}
+// only the admin can read the queue (Firebase refuses everyone else)
+function queueWatch() {
+  if (!noteAdmin) { if (queueOff) { queueOff(); queueOff = null; } queue = []; return; }
+  if (queueOff || !db) return;
+  queueOff = db.collection('notesq').onSnapshot(s => {
+    queue = s.docs.map(d => Object.assign({}, d.data(), { id: d.id })).filter(q => typeof q.t === 'string').sort((a, b) => (a.d || 0) - (b.d || 0));
+    notesRender();
+  }, () => { queueOff = null; queue = []; notesRender(); });
+}
+async function noteApprove(q, ok) {
+  try {
+    if (FB) {
+      const F = await fbInit(), D = F.D;
+      if (!ok) await D.remove(D.ref(F.rdb, 'notesq/' + q.id));
+      else {
+        const s = (Number((await D.get(D.ref(F.rdb, 'notemeta/s'))).val()) || 0) + 1, body = { t: q.t, d: noteDay(), s, f: 0 };
+        if (q.to) body.to = q.to;
+        await D.update(D.ref(F.rdb), { ['notes/' + q.id]: body, 'notemeta/s': s, ['notesq/' + q.id]: null });
+      }
+    } else {
+      if (ok) {
+        const body = { t: q.t, d: noteDay(), s: notes.reduce((m, x) => Math.max(m, x.s || 0), 0) + 1, f: 0 };
+        if (q.to) body.to = q.to;
+        await db.doc('notes/' + q.id).set(body);
+      }
+      await db.doc('notesq/' + q.id).delete();
+    }
+    noteMsg = ok ? 'Зөвшөөрлөө. Самбарт гарлаа.' : 'Татгалзлаа, устгагдлаа.'; sfx(ok ? 'good' : 'tick');
+  } catch { noteMsg = 'Чадсангүй. Самбарын код өөрчлөгдсөн бол дахин оруулна уу.'; noteAdminCheck(); }
   notesRender();
 }
 async function notePost() {
@@ -613,30 +829,25 @@ async function notePost() {
   if (t.length > NOTE_MAX || to.length > NOTE_TO) { noteMsg = 'Хэт урт байна.'; notesRender(); return; }
   noteBusy = true; noteMsg = ''; notesRender();
   let err = null;
-  for (let attempt = 0; attempt < 3; attempt++) {   // two people posting at once race for the same order number
-    err = null;
-    const id = (rid() + rid()).slice(0, 16);
-    try {
-      if (FB) {
-        const F = await fbInit(), D = F.D, R = p => D.ref(F.rdb, p);
-        const [lim, meta] = await Promise.all([D.get(R('notelimit/' + F.uid)), D.get(R('notemeta/s'))]);
-        const L = lim.val(), d = Math.max(noteDay(), (L && L.d) || 0), n = L && L.d === d ? L.n + 1 : 1;
-        if (n > NOTE_DAY) throw { code: 'limit' };
-        const s = (Number(meta.val()) || 0) + 1, body = { t, d, s, f: 0 };
-        if (to) body.to = to;
-        await D.update(D.ref(F.rdb), { ['notes/' + id]: body, 'notemeta/s': s, ['notelimit/' + F.uid]: { d, n } });
-      } else {
-        const d = noteDay(), L = LS.get('notelim', null), n = L && L.d === d ? L.n + 1 : 1;
-        if (n > NOTE_DAY) throw { code: 'limit' };
-        const body = { t, d, s: notes.reduce((m, x) => Math.max(m, x.s || 0), 0) + 1, f: 0 };
-        if (to) body.to = to;
-        await db.doc('notes/' + id).set(body);
-        LS.set('notelim', { d, n });
-      }
-      break;
-    } catch (e) { err = e; if (e && e.code === 'limit') break; }
-  }
-  if (!err) { noteDraft.t = ''; noteDraft.to = ''; noteMsg = 'Илгээгдлээ. Хэн бичсэн нь хэнд ч харагдахгүй.'; sfx('good'); }
+  const id = (rid() + rid()).slice(0, 16);
+  try {   // into the queue; the day count goes up in the same write
+    if (FB) {
+      const F = await fbInit(), D = F.D;
+      const L = (await D.get(D.ref(F.rdb, 'notelimit/' + F.uid))).val(), d = Math.max(noteDay(), (L && L.d) || 0), n = L && L.d === d ? L.n + 1 : 1;
+      if (n > NOTE_DAY) throw { code: 'limit' };
+      const body = { t, d };
+      if (to) body.to = to;
+      await D.update(D.ref(F.rdb), { ['notesq/' + id]: body, ['notelimit/' + F.uid]: { d, n } });
+    } else {
+      const d = noteDay(), L = LS.get('notelim', null), n = L && L.d === d ? L.n + 1 : 1;
+      if (n > NOTE_DAY) throw { code: 'limit' };
+      const body = { t, d };
+      if (to) body.to = to;
+      await db.doc('notesq/' + id).set(body);
+      LS.set('notelim', { d, n });
+    }
+  } catch (e) { err = e || {}; }
+  if (!err) { noteDraft.t = ''; noteDraft.to = ''; noteMsg = 'Илгээгдлээ. Самбарын эзэн зөвшөөрсний дараа самбарт гарна. Хэн бичсэн нь хэнд ч харагдахгүй.'; sfx('good'); }
   else noteMsg = err.code === 'limit' ? 'Өдөрт ' + NOTE_DAY + ' хүртэл үг бичнэ. Маргааш дахин бичээрэй.' : 'Илгээж чадсангүй. Дахин оролдоно уу.';
   noteBusy = false; notesRender();
 }
@@ -671,13 +882,13 @@ async function noteAdminLogin() {
   }
   noteDraft.code = ''; noteAdmin = ok; noteAsk = !ok;
   noteMsg = ok ? 'Самбарын эзний эрх энэ төхөөрөмж дээр идэвхжлээ.' : 'Код буруу байна.';
-  notesRender();
+  queueWatch(); notesRender(); adsRender();
 }
 async function noteAdminLogout() {
   try { const F = await fbInit(); await F.D.remove(F.D.ref(F.rdb, 'noteadmins/' + F.uid)); } catch {}
-  noteAdmin = false; noteMsg = ''; notesRender();
+  noteAdmin = false; noteMsg = ''; queueWatch(); notesRender(); adsRender();
 }
-const noteDate = d => { const x = new Date(d); return (x.getUTCMonth() + 1) + ' сарын ' + x.getUTCDate(); };
+const noteDate = d => { const x = new Date(d + UB); return (x.getUTCMonth() + 1) + ' сарын ' + x.getUTCDate(); };
 function notesRender() {
   const box = $('#notes');
   box.hidden = !online || dbState === 'off';
@@ -685,7 +896,19 @@ function notesRender() {
   const act = document.activeElement, fid = act && box.contains(act) && act.id ? act.id : null, sel = fid ? act.selectionStart : null;
   box.replaceChildren();
   const head = el('div', 'arhead'); head.append(el('h2', '', 'Хэлэх үг'));
-  box.append(head, el('p', 'note', 'Хамт олон, найз нөхөддөө хэлэх үгээ үлдээгээрэй. Нэр хадгалагдахгүй тул хэн бичсэн нь хэнд ч харагдахгүй. Бусдыг гомдоохгүй байцгаая.'));
+  if (noteAdmin && queue.length) head.append(el('span', 'chip', queue.length + ' хүлээгдэж байна'));
+  box.append(head, el('p', 'note', 'Хамт олон, найз нөхөддөө хэлэх үгээ үлдээгээрэй. Нэр хадгалагдахгүй тул хэн бичсэн нь хэнд ч харагдахгүй. Самбарын эзэн зөвшөөрсний дараа самбарт гарна.'));
+  if (noteAdmin && queue.length) {   // the admin's queue: approve or drop, oldest first
+    const ql = el('div', 'nqueue');
+    ql.append(el('span', 'seglbl', 'Зөвшөөрөл хүлээж буй'));
+    for (const q of queue.slice(0, 20)) {
+      const c = el('div', 'nq');
+      if (typeof q.to === 'string' && q.to) c.append(el('span', 'to', '→ ' + q.to));
+      c.append(el('p', 't', q.t), chBtns(chBtn('Зөвшөөрөх', 'btn', () => noteApprove(q, true)), chBtn('Татгалзах', 'btn ghost', () => noteApprove(q, false))));
+      ql.append(c);
+    }
+    box.append(ql);
+  }
   if (canWrite && db) {
     const c = el('div', 'ncompose'), to = el('input'), ta = el('textarea'), cnt = el('span', 'note num');
     to.id = 'noteTo'; to.maxLength = NOTE_TO; to.placeholder = 'Хэнд (заавал биш): Бүгдэд, багийнхандаа…'; to.value = noteDraft.to;
@@ -732,6 +955,100 @@ function notesRender() {
   if (fid) { const e = document.getElementById(fid); if (e) { e.focus({ preventScroll: true }); try { if (sel != null) e.setSelectionRange(sel, sel); } catch {} } }
 }
 
+/* ---------- Зарлал: notices with the author's name, db ads/<id> = {t, b?, when?, room?, tour?, by, who, at, until}.
+   Anyone may post (3 live notices each), the author or the board admin deletes, a notice drops off a day after its date
+   (or a week after posting when it has none). It can point at a room code or a chess tournament. ---------- */
+const AD_T = 60, AD_B = 400, AD_MAX = 3;
+let ads = [], adsOff = null, adOpen = false, adMsg = '', adDel = '';
+const adDraft = { t: '', b: '', when: '', link: '' };
+function adsStart() {
+  if (adsOff || !db) return;
+  adsOff = db.collection('ads').onSnapshot(s => {
+    ads = s.docs.map(d => Object.assign({}, d.data(), { id: d.id })).filter(a => typeof a.t === 'string' && Number.isFinite(a.until));
+    loadNames(ads.map(a => a.by)).then(n => { if (n) adsRender(); });
+    adsRender();
+  }, () => {});
+}
+function adsLive() {   // coming events first (soonest on top), then the rest newest first
+  const now = srvNow();
+  const live = ads.filter(a => a.until > now);
+  const soon = live.filter(a => Number.isFinite(a.when) && a.when >= now - 3600e3).sort((a, b) => a.when - b.when);
+  return [...soon, ...live.filter(a => !soon.includes(a)).sort((a, b) => (b.at || 0) - (a.at || 0))];
+}
+const adWhen = ms => { const x = new Date(ms); return (x.getMonth() + 1) + ' сарын ' + x.getDate() + ', ' + String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0'); };
+async function adPost() {
+  const t = adDraft.t.trim(), b = adDraft.b.trim();
+  if (!t || !db || !me.uid) { adMsg = 'Гарчиг бичнэ үү.'; adsRender(); return; }
+  if (adsLive().filter(a => a.by === me.uid).length >= AD_MAX) { adMsg = 'Нэг хүн зэрэг ' + AD_MAX + ' хүртэл зарлалтай байна. Хуучнаа устгаад нэмээрэй.'; adsRender(); return; }
+  const now = srvNow(), when = adDraft.when ? new Date(adDraft.when).getTime() : NaN;
+  const body = { t: t.slice(0, AD_T), by: me.uid, who: (me.name || myName() || '').slice(0, 24) || null, at: now, until: Number.isFinite(when) && when > now ? Math.min(when + DAY, now + 60 * DAY) : now + 7 * DAY };
+  if (b) body.b = b.slice(0, AD_B);
+  if (Number.isFinite(when)) body.when = when;
+  if (adDraft.link.startsWith('r:')) body.room = adDraft.link.slice(2);
+  if (adDraft.link.startsWith('t:')) body.tour = adDraft.link.slice(2);
+  try {
+    await db.doc('ads/' + (rid() + rid()).slice(0, 14)).set(body);
+    adDraft.t = adDraft.b = adDraft.when = adDraft.link = ''; adOpen = false; adMsg = ''; sfx('good');
+  } catch (e) { adMsg = 'Нийтэлж чадсангүй' + (e && e.code === 'invalid_argument' ? ': Contributor эрх хэрэгтэй.' : '. Дахин оролдоно уу.'); }
+  adsRender();
+}
+async function adRemove(a) {
+  if (adDel !== a.id) { adDel = a.id; adsRender(); return; }
+  adDel = '';
+  try { await db.doc('ads/' + a.id).delete(); } catch { adMsg = 'Устгаж чадсангүй.'; }
+  adsRender();
+}
+function adOpenTour(ref) {
+  chCfg.mode = 'tour'; openAny('chess'); chSetup();
+  if (ref.startsWith('x-')) tourJoinCode(ref.slice(2)); else chTourOpen(ref);
+}
+function adsRender() {
+  const box = $('#ads');
+  if (!box) return;
+  box.hidden = !online || dbState === 'off';
+  if (box.hidden) return;
+  const act = document.activeElement, fid = act && box.contains(act) && act.id ? act.id : null, sel = fid ? act.selectionStart : null;
+  box.replaceChildren();
+  const head = el('div', 'arhead'); head.append(el('h2', '', 'Зарлал'));
+  if (db && me.uid && canWrite && !adOpen) head.append(chBtn('＋ Зарлал', 'btn', () => { adOpen = true; adMsg = ''; chTourList(); sfx('tick'); adsRender(); }));
+  box.append(head);
+  if (adOpen) {
+    const f = el('div', 'adform'), t = el('input'), b = el('textarea'), w = el('input'), link = el('select');
+    t.id = 'adT'; t.maxLength = AD_T; t.placeholder = 'Гарчиг, жишээ нь «Баасан гаригт шатрын тэмцээн»'; t.value = adDraft.t; t.oninput = () => { adDraft.t = t.value; };
+    b.id = 'adB'; b.maxLength = AD_B; b.rows = 3; b.placeholder = 'Дэлгэрэнгүй (заавал биш)'; b.value = adDraft.b; b.oninput = () => { adDraft.b = b.value; };
+    w.id = 'adW'; w.type = 'datetime-local'; w.value = adDraft.when; w.oninput = () => { adDraft.when = w.value; };
+    const opts = [['', 'Холбоосгүй']];
+    if (arenaCode) opts.push(['r:' + arenaCode, 'Миний өрөө ' + arenaCode]);
+    for (const x of tours.slice(0, 12)) opts.push(['t:' + x.id, 'Шатрын тэмцээн: ' + x.name]);
+    for (const x of myTours.map(r => codedMeta.get(r)).filter(Boolean)) opts.push(['t:' + x.id, 'Шатрын тэмцээн (код ' + tourCodeOf(x.id) + '): ' + x.name]);
+    for (const [v, txt] of opts) { const o = el('option', '', txt); o.value = v; o.selected = adDraft.link === v; link.append(o); }
+    link.onchange = () => { adDraft.link = link.value; };
+    const lab = (txt, x) => { const l = el('label', 'adlab', txt); l.append(x); return l; };
+    f.append(t, b, lab('Хэзээ (заавал биш)', w), lab('Холбох (заавал биш)', link),
+      el('p', 'note', 'Таны нэр зарлал дээр харагдана. Огноо заасан бол тэр өдрөөс хойш нэг хоногийн дараа, огноогүй бол 7 хоногийн дараа өөрөө алга болно.'),
+      chBtns(chBtn('Нийтлэх', 'btn', adPost), chBtn('Болих', 'btn ghost', () => { adOpen = false; adMsg = ''; adsRender(); })));
+    box.append(f);
+  }
+  if (adMsg) box.append(el('p', 'note', adMsg));
+  const list = el('div', 'adlist'), live = adsLive();
+  if (!live.length && !adOpen) list.append(el('p', 'note', 'Одоогоор зарлал алга. Тэмцээн, уулзалт зохион байгуулж байвал энд зарлаарай.'));
+  for (const a of live.slice(0, 30)) {
+    const c = el('article', 'adcard');
+    c.append(el('h3', '', a.t));
+    if (Number.isFinite(a.when)) c.append(el('span', 'when', '🗓 ' + adWhen(a.when)));
+    if (typeof a.b === 'string' && a.b) c.append(el('p', '', a.b));
+    const acts = el('div', 'acts');
+    if (typeof a.room === 'string' && /^[A-Z0-9]{4,6}$/.test(a.room)) acts.append(chBtn('Өрөөнд орох ' + a.room, 'btn ghost', () => { arenaEnter(a.room); scrollTo({ top: 0, behavior: 'smooth' }); }));
+    if (typeof a.tour === 'string' && /^(x-)?[a-z0-9]{1,12}$/.test(a.tour)) acts.append(chBtn('Тэмцээн нээх', 'btn ghost', () => adOpenTour(a.tour)));
+    if (a.by === me.uid || noteAdmin) acts.append(chBtn(adDel === a.id ? 'Итгэлтэй юу?' : 'Устгах', 'linkbtn', () => adRemove(a)));
+    if (acts.childElementCount) c.append(acts);
+    c.append(el('span', 'by', (nameCache[a.by] || (typeof a.who === 'string' && a.who) || 'Тоглогч') + ' · ' + adWhen(a.at)));
+    list.append(c);
+  }
+  box.append(list);
+  if (fid) { const e = document.getElementById(fid); if (e) { e.focus({ preventScroll: true }); try { if (sel != null && e.setSelectionRange) e.setSelectionRange(sel, sel); } catch {} } }
+}
+
 /* ---------- views ---------- */
 const hub = $('#hub'), play = $('#play'), quizv = $('#quizv');
 function showView(v) {
@@ -744,9 +1061,9 @@ function openAny(k) {
   if (k === 'quiz') return openQuiz(false);
   if (k === 'live') return openQuiz(true);
   if (k === 'chess') return openChess();
-  if (k === 'fps') {   // the 3D shooter is its own page on the link version
-    if (inClaude) { toastNote = { text: 'Буудлага зөвхөн линкээр нээдэг (GitHub Pages) хувилбарт тоглогдоно.' }; toastRender(); return; }
-    location.href = 'buudlaga.html' + (arenaCode ? '#r=' + arenaCode : '');
+  if (PAGES[k]) {
+    if (inClaude) { toastNote = { text: GAMES[k].name + ' зөвхөн линкээр нээдэг (GitHub Pages) хувилбарт тоглогдоно.' }; toastRender(); return; }
+    location.href = PAGES[k] + (arenaCode ? '#r=' + arenaCode : '');   // the page joins the same room
     return;
   }
   openGame(k);
@@ -2516,7 +2833,7 @@ function chTourOpen(id) {
   tourRepaint();
 }
 function chTourClose() { if (tour) { for (const off of tour.offs) try { off(); } catch {} tour = null; } tourEdit = ''; tourDel = ''; }
-function tourRepaint() { if (!chessv.hidden && shown('chSetup') && chCfg.mode === 'tour') chSetupPaint(); }
+function tourRepaint() { if (!chessv.hidden && shown('chSetup') && chCfg.mode === 'tour') chSetupPaint(); if (adOpen) adsRender(); }
 async function tourDo(fn) {
   tourErr = '';
   try { await fn(); } catch (e) { tourErr = 'Хадгалж чадсангүй' + (e && e.code === 'invalid_argument' ? ': эрх хүрэхгүй байна (Contributor эрх хэрэгтэй).' : '. Дахин оролдоно уу.'); }
