@@ -14,8 +14,9 @@ const GAMES = {
   puzzle: { name: 'Таавар 3×3', better: 'low', fmt: v => Number(v).toFixed(1) + ' сек', hud: 'Хугацаа' },
   quiz:   { name: 'Мэдлэгийн сорил', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: 'Оноо' },
   chess:  { name: 'Шатар', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: 'Нүүдэл' },   // running total of wins vs the computer
+  fps:    { name: 'Буудлага', better: 'high', fmt: v => fmtInt(v) + ' онолт', hud: '' },     // most hits-out in one match; the game itself is buudlaga.html
 };
-const WHERE = { hub: 'Нүүр', flappy: 'Болжмор', race: 'Карьерын зам', puzzle: 'Таавар', quiz: 'Сорил', live: 'Хамтдаа сорил', chess: 'Шатар' };
+const WHERE = { hub: 'Нүүр', flappy: 'Болжмор', race: 'Карьерын зам', puzzle: 'Таавар', quiz: 'Сорил', live: 'Хамтдаа сорил', chess: 'Шатар', fps: 'Буудлага' };
 const isBetter = (g, a, b) => b == null || (GAMES[g].better === 'high' ? a > b : a < b);
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
 const dayOf = ms => { const d = new Date(ms); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
@@ -179,12 +180,14 @@ function autoStart() {
 /* Firebase Realtime Database + anonymous sign-in, wrapped in the same shapes the page uses from claude.use():
    db (doc / collection / onSnapshot), room (one presence node per open page, removed on disconnect), user (names/<uid>). */
 const FB_SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
-let fbBoot = null;
+let fbBoot = null, fbOffset = 0;   // server clock minus ours; the rules compare against server time
+const srvNow = () => Date.now() + fbOffset;
 function fbInit() {
   return fbBoot || (fbBoot = (async () => {
     const [A, U, D] = await Promise.all(['app', 'auth', 'database'].map(m => import(FB_SDK + 'firebase-' + m + '.js')));
     const app = A.initializeApp(FB), cred = await U.signInAnonymously(U.getAuth(app));
     const F = { D, rdb: D.getDatabase(app), uid: cred.user.uid };
+    D.onValue(D.ref(F.rdb, '.info/serverTimeOffset'), s => { fbOffset = Number(s.val()) || 0; }, () => {});
     if (myName()) D.set(D.ref(F.rdb, 'names/' + F.uid), myName()).catch(() => {});
     return F;
   })());
@@ -290,6 +293,7 @@ function askName(first) {
 $('#nameBtn').onclick = () => { sfx('tick'); askName(false); };
 
 async function boot() {
+  if (inClaude) for (const x of $$('[data-open="fps"], #tabs [data-tab="fps"]')) x.style.display = 'none';   // the shooter lives on the link version only
   renderBoard(); paintBests(); renderOnline(); arenaRender();
   if (!online) { dbState = 'off'; $('#liveFoot').textContent = 'Зөвхөн онлайн хувилбарт ажиллана'; renderBoard(); autoStart(); return; }
   if (FB) { if (!myName()) await askName(true); paintNameBtn(); }
@@ -301,16 +305,18 @@ async function boot() {
       me.uid = m.id; me.name = m.name; me.avatar = m.avatarUrl; me.color = m.color;
       const cw = await u.can('data.write'); if (cw === false) canWrite = false;
     }
-    renderBoard(); paintBests(); renderOnline(); chRefresh(); arenaRender();
+    renderBoard(); paintBests(); renderOnline(); chRefresh(); arenaRender(); invListen(); noteAdminCheck();
   }).catch(() => {});
   use('db').then(d => {
     db = d;
-    if (!d) { dbState = 'off'; renderBoard(); chRefresh(); return; }
+    if (!d) { dbState = 'off'; renderBoard(); chRefresh(); arenaRender(); notesRender(); return; }
     dbState = 'on';
     if (!chessv.hidden && chCfg.mode === 'tour') chTourList();
-    chRefresh();
+    chRefresh(); invListen(); notesStart();
     const code = (location.hash.match(/(?:^#|&)r=([A-Za-z0-9]{4,6})/) || [])[1] || LS.get('arena', '');
     if (code) arenaEnter(code); else arenaRender();
+    const tcode = (location.hash.match(/(?:^#|&)t=([A-Za-z0-9]{4,6})/) || [])[1];   // link to a coded tournament
+    if (tcode) { chCfg.mode = 'tour'; openAny('chess'); chSetup(); tourJoinCode(tcode); }
     d.collection('scores').onSnapshot(snap => {
       scores = new Map(snap.docs.map(x => [x.id, x.data()]));
       renderBoard(); paintBests();
@@ -327,9 +333,15 @@ async function boot() {
   }).catch(() => {});
 }
 
-/* ---------- Өрөө: a code-named room (db arena/<CODE>, …/scores/<uid>) for timed contests among teammates ---------- */
-const ARENA_GAMES = ['flappy', 'race', 'puzzle', 'quiz'], ARENA_MINS = [3, 5, 10, 15, 30];
+/* ---------- Өрөө: a room for timed contests among teammates.
+   Coded rooms live in arena/<CODE> (readable only with the code), open ones in openarena/<CODE> (listed);
+   members of an open room keep openlive/<CODE>_<uid> fresh so empty rooms drop off the list. ---------- */
+const ARENA_GAMES = ['flappy', 'race', 'puzzle', 'quiz'], ARENA_MINS = [3, 5, 10, 15, 30], LIVE_MS = 3 * 60000, DAY = 86400000;
 let arenaCode = '', arenaDoc = null, arenaScores = new Map(), arenaOffs = [], arenaRoom = null, arenaPeers = [], arenaErr = '', arenaJoining = 0, arenaDraft = '';
+let arenaBase = '', arenaOpen = false, arenaMaking = false, arenaKind = LS.get('arenaKind', 'open') === 'code' ? 'code' : 'open';
+let openRooms = [], openLive = [], openOffs = [], openCleanAt = 0;
+const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const newCode = () => Array.from({ length: 5 }, () => CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)]).join('');
 const arenaPick = Object.assign({ game: 'flappy', mins: 10 }, LS.get('arenaPick', {}));
 if (!ARENA_GAMES.includes(arenaPick.game)) arenaPick.game = 'flappy';
 if (!ARENA_MINS.includes(arenaPick.mins)) arenaPick.mins = 10;
@@ -337,29 +349,67 @@ const roomName = base => (arenaCode ? base + '-' + arenaCode.toLowerCase() : bas
 const arenaLink = () => location.origin + location.pathname.replace(/[^/]*$/, '') + '#r=' + arenaCode;
 const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 
-function arenaEnter(raw) {
+async function arenaEnter(raw) {
   const code = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!/^[A-Z0-9]{4,6}$/.test(code)) { arenaErr = 'Өрөөний код 4–6 үсэг, тооноос бүрдэнэ.'; arenaRender(); return; }
   if (!db) { arenaErr = 'Сервертэй холбогдоогүй байна (' + RECONNECT + ').'; arenaRender(); return; }
   arenaLeave();
   const tok = ++arenaJoining;
-  arenaCode = code; arenaErr = ''; arenaDraft = '';
+  arenaCode = code; arenaErr = ''; arenaDraft = ''; arenaMaking = false;
+  arenaRender();
+  let base = '';
+  for (const b of ['arena/', 'openarena/']) {
+    const s = await db.doc(b + code).get().catch(() => null);
+    if (tok !== arenaJoining) return;
+    if (s && s.exists) { base = b + code; break; }
+  }
+  if (!base) { arenaErr = code + ' кодтой өрөө олдсонгүй.'; arenaLeave(); return; }
+  arenaBase = base; arenaOpen = base.startsWith('openarena/');
   let seen = false;
-  arenaOffs.push(db.doc('arena/' + code).onSnapshot(s => {
+  arenaOffs.push(db.doc(base).onSnapshot(s => {
     if (tok !== arenaJoining) return;
     if (!s.exists) { arenaErr = seen ? 'Өрөө хаагдлаа.' : code + ' кодтой өрөө олдсонгүй.'; arenaLeave(); return; }
     seen = true; arenaDoc = s.data(); LS.set('arena', code);
     loadNames([arenaDoc.by]).then(n => { if (n) arenaRender(); });
     arenaRender();
   }, () => {}));
-  arenaOffs.push(db.collection('arena/' + code + '/scores').onSnapshot(s => {
+  arenaOffs.push(db.collection(base + '/scores').onSnapshot(s => {
     if (tok !== arenaJoining) return;
     arenaScores = new Map(s.docs.map(x => [x.id, x.data()]));
     loadNames([...arenaScores.keys()]).then(n => { if (n) arenaRender(); });
     arenaRender();
   }, () => {}));
   arenaJoinRoom(code, tok);
+  arenaBeat();
   arenaRender();
+}
+// open rooms: say "I'm here" every minute; the organizer also keeps `seen` fresh so the room is not swept
+function arenaBeat() {
+  if (!arenaOpen || !arenaCode || !db || !me.uid || !canWrite) return;
+  db.doc('openlive/' + arenaCode + '_' + me.uid).set({ code: arenaCode, at: Date.now() }).catch(() => {});
+  if (arenaDoc && arenaDoc.by === me.uid) db.doc(arenaBase).update({ seen: Date.now() }).catch(() => {});
+}
+setInterval(arenaBeat, 60000);
+const liveIn = code => openLive.filter(v => v.code === code && Date.now() - v.at < LIVE_MS);
+function openWatch() {
+  if (openOffs.length || !db) return;
+  openOffs.push(db.collection('openarena').onSnapshot(s => {
+    openRooms = s.docs.map(d => Object.assign({}, d.data(), { code: d.id })).filter(r => /^[A-Z0-9]{4,6}$/.test(r.code));
+    openSweep(); arenaRender();
+  }, () => {}));
+  openOffs.push(db.collection('openlive').onSnapshot(s => {
+    openLive = s.docs.map(d => { const v = d.data() || {}; return { key: d.id, uid: d.id.slice(d.id.indexOf('_') + 1), code: v.code, at: v.at }; })
+      .filter(v => typeof v.code === 'string' && Number.isFinite(v.at));
+    openSweep(); arenaRender();
+  }, () => {}));
+}
+// remove rooms and "I'm here" marks nobody has touched for a day (the rules allow anyone to delete those)
+function openSweep() {
+  if (!db || !canWrite || Date.now() - openCleanAt < 10 * 60000 || (!openRooms.length && !openLive.length)) return;
+  openCleanAt = Date.now();
+  const old = Date.now() - DAY;
+  for (const r of openRooms) if ((r.seen || r.at || 0) < old) db.doc('openarena/' + r.code).delete().catch(() => {});
+  for (const v of openLive) if (v.at < old) db.doc('openlive/' + v.key).delete().catch(() => {});
 }
 async function arenaJoinRoom(code, tok) {
   if (!room || arenaRoom) return;
@@ -376,39 +426,46 @@ function arenaLeave() {
   for (const off of arenaOffs) try { off(); } catch {}
   arenaOffs = [];
   if (arenaRoom) { arenaRoom.leave().catch(() => {}); arenaRoom = null; }
-  arenaPeers = []; arenaCode = ''; arenaDoc = null; arenaScores = new Map(); LS.set('arena', '');
+  if (arenaOpen && arenaCode && db && me.uid) {
+    db.doc('openlive/' + arenaCode + '_' + me.uid).delete().catch(() => {});
+    // the organizer closes an open room when nobody else is left in it
+    if (arenaDoc && arenaDoc.by === me.uid && !liveIn(arenaCode).some(v => v.uid !== me.uid)) db.doc(arenaBase).delete().catch(() => {});
+  }
+  arenaPeers = []; arenaCode = ''; arenaBase = ''; arenaOpen = false; arenaDoc = null; arenaScores = new Map(); LS.set('arena', '');
   arenaRender();
 }
 async function arenaCreate() {
   if (!db || !me.uid) return;
-  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const open = arenaKind === 'open', base = open ? 'openarena/' : 'arena/';
   let code = '';
-  for (let k = 0; k < 5; k++) {
-    code = Array.from({ length: 5 }, () => A[Math.floor(Math.random() * A.length)]).join('');
-    const s = await db.doc('arena/' + code).get().catch(() => null);
-    if (s && !s.exists) break;
+  for (let k = 0; k < 6; k++) {   // a code must be free in both kinds
+    code = newCode();
+    const [a, b] = await Promise.all([db.doc('arena/' + code).get().catch(() => null), db.doc('openarena/' + code).get().catch(() => null)]);
+    if (a && b && !a.exists && !b.exists) break;
   }
+  const now = Date.now(), body = { by: me.uid, at: now, game: arenaPick.game, mins: arenaPick.mins, round: '', start: 0, ends: 0 };
+  if (open) body.seen = now;
   try {
-    await db.doc('arena/' + code).set({ by: me.uid, at: Date.now(), game: arenaPick.game, mins: arenaPick.mins, round: '', start: 0, ends: 0 });
-    sfx('good'); arenaEnter(code);
+    await db.doc(base + code).set(body);
+    arenaMaking = false; sfx('good'); arenaEnter(code);
   } catch (e) {
     arenaErr = 'Өрөө нээж чадсангүй' + (e && e.code === 'invalid_argument' ? ': Contributor эрх хэрэгтэй.' : '. Дахин оролдоно уу.'); arenaRender();
   }
 }
 async function arenaStart() {
-  if (!db || !arenaCode) return;
+  if (!db || !arenaBase) return;
   const now = Date.now();
-  try { await db.doc('arena/' + arenaCode).update({ game: arenaPick.game, mins: arenaPick.mins, round: rid(), start: now, ends: now + arenaPick.mins * 60000 }); sfx('good'); }
+  try { await db.doc(arenaBase).update({ game: arenaPick.game, mins: arenaPick.mins, round: rid(), start: now, ends: now + arenaPick.mins * 60000 }); sfx('good'); }
   catch { arenaErr = 'Тэмцээн эхлүүлж чадсангүй. Дахин оролдоно уу.'; arenaRender(); }
 }
-async function arenaStop() { try { await db.doc('arena/' + arenaCode).update({ ends: Date.now() }); } catch {} }
+async function arenaStop() { try { await db.doc(arenaBase).update({ ends: Date.now() }); } catch {} }
 // a finished run counts for the room while its contest in that game is running
 async function arenaSubmit(g, v) {
   const d = arenaDoc;
   if (!db || !me.uid || !d || !d.round || d.game !== g || Date.now() > d.ends) return false;
   const prev = arenaScores.get(me.uid);
   if (prev && prev.round === d.round && !isBetter(g, v, prev.best)) return true;
-  try { await db.doc('arena/' + arenaCode + '/scores/' + me.uid).set({ best: v, at: Date.now(), round: d.round }); return true; } catch { return false; }
+  try { await db.doc(arenaBase + '/scores/' + me.uid).set({ best: v, at: Date.now(), round: d.round }); return true; } catch { return false; }
 }
 function arenaRows() {
   const d = arenaDoc; if (!d || !d.round || !GAMES[d.game]) return [];
@@ -434,18 +491,37 @@ function arenaRender() {
   head.append(el('h2', '', 'Өрөө'));
   box.append(head);
   if (!arenaCode) {
-    box.append(el('p', 'note', 'Өрөө нээгээд кодоо багийнхандаа өг. Нэг тоглоомоор тогтсон хугацаанд өрсөлдөж, хамгийн өндөр оноо авсан нь ялна. Өрөөн доторх «Хамтдаа сорил», шатарт зөвхөн өрөөнийхөн орно.'));
+    openWatch();
+    box.append(el('p', 'note', 'Нэг тоглоомоор тогтсон хугацаанд өрсөлдөж, хамгийн өндөр оноо авсан нь ялна. Өрөөн доторх «Хамтдаа сорил», шатарт зөвхөн өрөөнийхөн орно.'));
+    if (arenaMaking) {
+      // the kind is chosen every time a room is made; «Кодгүй» is preselected (see arenaKind)
+      const s = el('div', 'seg');
+      for (const [t, v] of [['Кодгүй (нээлттэй)', 'open'], ['Кодтой (хаалттай)', 'code']]) {
+        const b = chBtn(t, '', () => { arenaKind = v; LS.set('arenaKind', v); sfx('tick'); arenaRender(); });
+        b.setAttribute('aria-pressed', String(arenaKind === v)); s.append(b);
+      }
+      box.append(el('span', 'seglbl', 'Өрөөний төрөл'), s,
+        el('p', 'note', arenaKind === 'open' ? 'Доорх «Нээлттэй өрөөнүүд» жагсаалтад харагдана. Хэн ч код бичилгүй нэг товчоор орно.' : 'Жагсаалтад харагдахгүй. Зөвхөн код эсвэл холбоос авсан хүн орно.'),
+        chBtns(chBtn('Өрөө нээх', 'btn', () => { sfx('tick'); arenaCreate(); }), chBtn('Болих', 'btn ghost', () => { arenaMaking = false; arenaRender(); })));
+    } else if (db && me.uid && canWrite) head.append(chBtn('Өрөө нээх', 'btn', () => { sfx('tick'); arenaMaking = true; arenaRender(); }));
+    const live = openRooms.map(r => ({ r, n: liveIn(r.code).length })).filter(x => x.n > 0).sort((a, b) => b.n - a.n || (b.r.at || 0) - (a.r.at || 0));
+    loadNames(live.map(x => x.r.by)).then(n => { if (n) arenaRender(); });
+    box.append(el('span', 'seglbl', 'Нээлттэй өрөөнүүд'));
+    if (!live.length) box.append(el('p', 'note', dbState === 'wait' ? 'Холбогдож байна…' : 'Одоогоор нээлттэй өрөө алга.'));
+    for (const { r, n } of live.slice(0, 12)) {
+      const now = Date.now(), g = GAMES[r.game] ? r.game : 'flappy';
+      const st = r.round && now < r.ends ? GAMES[g].name + ', ' + mmss(r.ends - now) + ' үлдсэн' : r.round ? GAMES[g].name + ', тэмцээн дууссан' : 'Тэмцээн эхлээгүй';
+      box.append(chRow(nameOf(r.by) + '-ийн өрөө', st + ' · ' + n + ' хүн', chBtn('Орох', 'btn', () => { sfx('tick'); arenaEnter(r.code); })));
+    }
     const row = el('div', 'field'), inp = el('input');
-    inp.id = 'arenaIn'; inp.maxLength = 6; inp.placeholder = 'Өрөөний код'; inp.value = arenaDraft; inp.autocapitalize = 'characters'; inp.autocomplete = 'off';
+    inp.id = 'arenaIn'; inp.maxLength = 6; inp.placeholder = 'Код'; inp.value = arenaDraft; inp.autocapitalize = 'characters'; inp.autocomplete = 'off';
     inp.oninput = () => { arenaDraft = inp.value.toUpperCase(); };
-    const go = chBtn('Орох', 'btn ghost', () => { sfx('tick'); arenaEnter(arenaDraft); });
+    const go = chBtn('Кодоор орох', 'btn ghost', () => { sfx('tick'); arenaEnter(arenaDraft); });
     inp.onkeydown = e => { if (e.key === 'Enter') go.click(); };
     row.append(inp, go);
-    if (db && me.uid && canWrite) head.append(chBtn('Өрөө нээх', 'btn', () => { sfx('tick'); arenaCreate(); }));
     box.append(row);
-    if (dbState === 'wait') box.append(el('p', 'note', 'Холбогдож байна…'));
   } else {
-    head.append(el('span', 'code', arenaCode), chBtn('Гарах', 'btn ghost', () => { sfx('tick'); arenaErr = ''; arenaLeave(); }));
+    head.append(el('span', 'chip', arenaOpen ? 'Нээлттэй' : 'Кодтой'), el('span', 'code', arenaCode), chBtn('Гарах', 'btn ghost', () => { sfx('tick'); arenaErr = ''; arenaLeave(); }));
     if (FB) {
       const row = el('div', 'field'), link = el('input');
       link.readOnly = true; link.value = arenaLink(); link.setAttribute('aria-label', 'Өрөөний холбоос');
@@ -455,7 +531,7 @@ function arenaRender() {
         setTimeout(() => { copy.textContent = 'Холбоос хуулах'; }, 2500);
       });
       row.append(link, copy); box.append(row);
-    } else box.append(el('p', 'note', 'Багийнхандаа «' + arenaCode + '» кодыг хэлээрэй. Тэд энэ хуудасны «Өрөө» хэсэгт кодоо бичээд орно.'));
+    } else box.append(el('p', 'note', arenaOpen ? 'Нээлттэй өрөө: багийнхан «Нээлттэй өрөөнүүд» жагсаалтаас шууд орно.' : 'Багийнхандаа «' + arenaCode + '» кодыг хэлээрэй. Тэд энэ хуудасны «Өрөө» хэсэгт кодоо бичээд орно.'));
     const d = arenaDoc;
     if (!d) box.append(el('p', 'note', 'Өрөөнд холбогдож байна…'));
     else {
@@ -490,7 +566,8 @@ function arenaRender() {
         box.append(el('span', 'seglbl', 'Хугацаа'), arenaSeg(ARENA_MINS.map(m => [m + ' мин', m]), arenaPick.mins, v => { arenaPick.mins = v; }));
         box.append(chBtns(chBtn(ended ? 'Шинэ тойрог эхлүүлэх' : 'Тэмцээн эхлүүлэх', 'btn', arenaStart)));
       }
-      box.append(el('span', 'seglbl', 'Өрөөнийхөнтэйгээ'), chBtns(chBtn('Хамтдаа сорил', 'btn ghost', () => openAny('live')), chBtn('Шатар', 'btn ghost', () => openAny('chess'))));
+      box.append(el('span', 'seglbl', 'Өрөөнийхөнтэйгээ'), chBtns(chBtn('Хамтдаа сорил', 'btn ghost', () => openAny('live')), chBtn('Шатар', 'btn ghost', () => openAny('chess')),
+        inClaude ? null : chBtn('Буудлага', 'btn ghost', () => openAny('fps'))));
     }
   }
   if (arenaErr) box.append(el('p', 'note bad', arenaErr));
@@ -504,6 +581,157 @@ setInterval(() => {
   else if (c || left > -2500) arenaRender();
 }, 1000);
 
+/* ---------- Хэлэх үг: anonymous notes to the team, db notes/<random id> = {t, to?, d: UTC day, s: order, f: reports}.
+   A note never stores who wrote it. Firebase rules: 5 notes a day per person (notelimit/<uid> keeps only day + count),
+   one report per person (noterep/<id>/<uid>, unreadable), delete / un-hide only for a device that entered the board code
+   (noteadmin/pin, typed in the Firebase console). In the Artifact the owner and editors are the admins. ---------- */
+const NOTE_MAX = 280, NOTE_TO = 30, NOTE_DAY = 5, NOTE_HIDE = 3;
+let notes = [], notesOff = null, noteAdmin = false, noteMsg = '', noteBusy = false, noteAsk = false;
+const noteDraft = { t: '', to: '', code: '' };
+let noteRep = new Set((LS.get('noterep', []) || []).filter(x => typeof x === 'string'));
+const noteDay = () => Math.floor(srvNow() / DAY) * DAY;
+function notesStart() {
+  if (notesOff || !db) return;
+  notesOff = db.collection('notes').onSnapshot(s => {
+    notes = s.docs.map(d => Object.assign({}, d.data(), { id: d.id }))
+      .filter(n => typeof n.t === 'string' && Number.isFinite(n.s) && Number.isFinite(n.d)).sort((a, b) => b.s - a.s);
+    notesRender();
+  }, () => {});
+  noteAdminCheck();
+}
+async function noteAdminCheck() {
+  if (inClaude) {
+    if (user) try { noteAdmin = !!((await user.isOwner()) || (await user.canEdit())); } catch {}
+  } else if (FB) {
+    try { const F = await fbInit(); noteAdmin = (await F.D.get(F.D.ref(F.rdb, 'noteadmins/' + F.uid))).exists(); } catch { noteAdmin = false; }
+  }
+  notesRender();
+}
+async function notePost() {
+  const t = noteDraft.t.trim().replace(/\n{3,}/g, '\n\n'), to = noteDraft.to.trim().replace(/\s+/g, ' ');
+  if (!t || noteBusy || !db) return;
+  if (t.length > NOTE_MAX || to.length > NOTE_TO) { noteMsg = 'Хэт урт байна.'; notesRender(); return; }
+  noteBusy = true; noteMsg = ''; notesRender();
+  let err = null;
+  for (let attempt = 0; attempt < 3; attempt++) {   // two people posting at once race for the same order number
+    err = null;
+    const id = (rid() + rid()).slice(0, 16);
+    try {
+      if (FB) {
+        const F = await fbInit(), D = F.D, R = p => D.ref(F.rdb, p);
+        const [lim, meta] = await Promise.all([D.get(R('notelimit/' + F.uid)), D.get(R('notemeta/s'))]);
+        const L = lim.val(), d = Math.max(noteDay(), (L && L.d) || 0), n = L && L.d === d ? L.n + 1 : 1;
+        if (n > NOTE_DAY) throw { code: 'limit' };
+        const s = (Number(meta.val()) || 0) + 1, body = { t, d, s, f: 0 };
+        if (to) body.to = to;
+        await D.update(D.ref(F.rdb), { ['notes/' + id]: body, 'notemeta/s': s, ['notelimit/' + F.uid]: { d, n } });
+      } else {
+        const d = noteDay(), L = LS.get('notelim', null), n = L && L.d === d ? L.n + 1 : 1;
+        if (n > NOTE_DAY) throw { code: 'limit' };
+        const body = { t, d, s: notes.reduce((m, x) => Math.max(m, x.s || 0), 0) + 1, f: 0 };
+        if (to) body.to = to;
+        await db.doc('notes/' + id).set(body);
+        LS.set('notelim', { d, n });
+      }
+      break;
+    } catch (e) { err = e; if (e && e.code === 'limit') break; }
+  }
+  if (!err) { noteDraft.t = ''; noteDraft.to = ''; noteMsg = 'Илгээгдлээ. Хэн бичсэн нь хэнд ч харагдахгүй.'; sfx('good'); }
+  else noteMsg = err.code === 'limit' ? 'Өдөрт ' + NOTE_DAY + ' хүртэл үг бичнэ. Маргааш дахин бичээрэй.' : 'Илгээж чадсангүй. Дахин оролдоно уу.';
+  noteBusy = false; notesRender();
+}
+async function noteReport(n) {
+  if (noteRep.has(n.id) || !db) return;
+  try {
+    if (FB) { const F = await fbInit(); await F.D.update(F.D.ref(F.rdb), { ['notes/' + n.id + '/f']: (n.f || 0) + 1, ['noterep/' + n.id + '/' + F.uid]: true }); }
+    else await db.doc('notes/' + n.id).update({ f: (n.f || 0) + 1 });
+    noteMsg = 'Мэдэгдэл хүлээж авлаа. ' + NOTE_HIDE + ' хүн мэдэгдвэл бичлэг нуугдана.';
+  } catch { noteMsg = 'Мэдэгдэж чадсангүй. Та өмнө нь мэдэгдсэн байж магадгүй.'; }
+  noteRep.add(n.id); LS.set('noterep', [...noteRep].slice(-300));
+  sfx('tick'); notesRender();
+}
+async function noteAdminDo(n, del) {
+  try {
+    if (FB) {
+      const F = await fbInit();
+      await F.D.update(F.D.ref(F.rdb), del ? { ['notes/' + n.id]: null, ['noterep/' + n.id]: null } : { ['notes/' + n.id + '/f']: 0 });
+    } else if (del) await db.doc('notes/' + n.id).delete();
+    else await db.doc('notes/' + n.id).update({ f: 0 });
+    noteMsg = del ? 'Устгагдлаа.' : 'Дахин харагдах боллоо.';
+  } catch { noteMsg = 'Чадсангүй. Самбарын код өөрчлөгдсөн бол дахин оруулна уу.'; noteAdminCheck(); }
+  notesRender();
+}
+async function noteAdminLogin() {
+  const code = noteDraft.code.trim();
+  if (!code || !FB) return;
+  const F = await fbInit(), ref = F.D.ref(F.rdb, 'noteadmins/' + F.uid);
+  let ok = false;
+  for (const pin of /^\d+$/.test(code) ? [code, Number(code)] : [code]) {   // the console may have stored digits as a number
+    try { await F.D.set(ref, { pin }); ok = true; break; } catch {}
+  }
+  noteDraft.code = ''; noteAdmin = ok; noteAsk = !ok;
+  noteMsg = ok ? 'Самбарын эзний эрх энэ төхөөрөмж дээр идэвхжлээ.' : 'Код буруу байна.';
+  notesRender();
+}
+async function noteAdminLogout() {
+  try { const F = await fbInit(); await F.D.remove(F.D.ref(F.rdb, 'noteadmins/' + F.uid)); } catch {}
+  noteAdmin = false; noteMsg = ''; notesRender();
+}
+const noteDate = d => { const x = new Date(d); return (x.getUTCMonth() + 1) + ' сарын ' + x.getUTCDate(); };
+function notesRender() {
+  const box = $('#notes');
+  box.hidden = !online || dbState === 'off';
+  if (box.hidden) return;
+  const act = document.activeElement, fid = act && box.contains(act) && act.id ? act.id : null, sel = fid ? act.selectionStart : null;
+  box.replaceChildren();
+  const head = el('div', 'arhead'); head.append(el('h2', '', 'Хэлэх үг'));
+  box.append(head, el('p', 'note', 'Хамт олон, найз нөхөддөө хэлэх үгээ үлдээгээрэй. Нэр хадгалагдахгүй тул хэн бичсэн нь хэнд ч харагдахгүй. Бусдыг гомдоохгүй байцгаая.'));
+  if (canWrite && db) {
+    const c = el('div', 'ncompose'), to = el('input'), ta = el('textarea'), cnt = el('span', 'note num');
+    to.id = 'noteTo'; to.maxLength = NOTE_TO; to.placeholder = 'Хэнд (заавал биш): Бүгдэд, багийнхандаа…'; to.value = noteDraft.to;
+    to.oninput = () => { noteDraft.to = to.value; };
+    ta.id = 'noteT'; ta.maxLength = NOTE_MAX; ta.rows = 3; ta.placeholder = 'Хэлэх үгээ бичээрэй…'; ta.value = noteDraft.t;
+    const paint = () => { cnt.textContent = ta.value.length + ' / ' + NOTE_MAX; send.disabled = noteBusy || !ta.value.trim(); };
+    ta.oninput = () => { noteDraft.t = ta.value; paint(); };
+    const send = chBtn(noteBusy ? 'Илгээж байна…' : 'Илгээх', 'btn', notePost);
+    const row = el('div', 'nrow'); row.append(cnt, send);
+    c.append(to, ta, row); box.append(c); paint();
+  } else box.append(el('p', 'note', inClaude ? 'Үг бичихэд Contributor эрх хэрэгтэй.' : 'Сервертэй холбогдож байна…'));
+  if (noteMsg) box.append(el('p', 'note', noteMsg));
+  const shown = notes.filter(n => (n.f || 0) < NOTE_HIDE || noteAdmin).slice(0, 60);
+  const list = el('div', 'nlist');
+  if (!shown.length) list.append(el('p', 'empty', 'Одоогоор үг алга. Эхнийхийг нь бичээрэй!'));
+  for (const n of shown) {
+    const hid = (n.f || 0) >= NOTE_HIDE, card = el('div', 'ncard' + (hid ? ' hid' : ''));
+    let h = 0; for (const ch of n.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;   // same paper, tilt and tack for a note on every device
+    card.style.setProperty('--paper', ['#FFF4A3', '#FFD9E2', '#D3ECFF', '#DBF5CB', '#FFE3BD'][h % 5]);
+    card.style.setProperty('--rot', ((h >> 3) % 7 - 3) * 0.9 + 'deg');
+    card.style.setProperty('--pin', ['#D03C3C', '#3A86D6', '#2E9E5B', '#D8A11A'][(h >> 6) % 4]);
+    if (typeof n.to === 'string' && n.to) card.append(el('span', 'to', '→ ' + n.to));
+    card.append(el('p', 't', n.t));
+    const meta = el('div', 'meta'); meta.append(el('span', '', noteDate(n.d) + (hid ? ' · нуугдсан (' + n.f + ' мэдэгдэл)' : '')));
+    const acts = el('span', 'acts');
+    if (!noteRep.has(n.id) && !hid && canWrite) acts.append(chBtn('Мэдэгдэх', 'linkbtn', () => noteReport(n)));
+    if (noteAdmin && hid) acts.append(chBtn('Сэргээх', 'linkbtn', () => noteAdminDo(n, false)));
+    if (noteAdmin) acts.append(chBtn('Устгах', 'linkbtn', () => noteAdminDo(n, true)));
+    meta.append(acts); card.append(meta); list.append(card);
+  }
+  box.append(list);
+  if (FB) {
+    if (noteAdmin) box.append(chBtns(el('span', 'note', 'Та самбарын эзэн (энэ төхөөрөмж).'), chBtn('Эзний эрхээс гарах', 'linkbtn', noteAdminLogout)));
+    else if (noteAsk) {
+      const f = el('div', 'field'), inp = el('input');
+      inp.id = 'noteCode'; inp.type = 'password'; inp.placeholder = 'Самбарын код'; inp.value = noteDraft.code; inp.autocomplete = 'off';
+      inp.oninput = () => { noteDraft.code = inp.value; };
+      const go = chBtn('Нэвтрэх', 'btn ghost', noteAdminLogin);
+      inp.onkeydown = e => { if (e.key === 'Enter') go.click(); };
+      f.append(inp, go, chBtn('Болих', 'linkbtn', () => { noteAsk = false; notesRender(); }));
+      box.append(f);
+    } else box.append(chBtns(chBtn('Самбарын эзэн', 'linkbtn', () => { noteAsk = true; notesRender(); })));
+  }
+  if (fid) { const e = document.getElementById(fid); if (e) { e.focus({ preventScroll: true }); try { if (sel != null) e.setSelectionRange(sel, sel); } catch {} } }
+}
+
 /* ---------- views ---------- */
 const hub = $('#hub'), play = $('#play'), quizv = $('#quizv');
 function showView(v) {
@@ -516,6 +744,11 @@ function openAny(k) {
   if (k === 'quiz') return openQuiz(false);
   if (k === 'live') return openQuiz(true);
   if (k === 'chess') return openChess();
+  if (k === 'fps') {   // the 3D shooter is its own page on the link version
+    if (inClaude) { toastNote = { text: 'Буудлага зөвхөн линкээр нээдэг (GitHub Pages) хувилбарт тоглогдоно.' }; toastRender(); return; }
+    location.href = 'buudlaga.html' + (arenaCode ? '#r=' + arenaCode : '');
+    return;
+  }
   openGame(k);
 }
 document.addEventListener('click', e => { if (e.target.closest('[data-back]')) goHub(); });
@@ -1618,7 +1851,7 @@ function openChess() {
   if (chCfg.mode === 'tour') chTourList();
   if (!chs.started || chs.over) chSetup(); else { chHide(); chPaint(); chAI(); }
 }
-function stopChess() { clearTimeout(chTimer); chDrag = -1; if (chs) chs.thinking = false; chLeaveRoom(); chTourStop(); }
+function stopChess() { clearTimeout(chTimer); chDrag = -1; if (chs) chs.thinking = false; chLeaveRoom(); chForceRoom = ''; chTourStop(); }
 function chSetup() {
   $('#chSetup').hidden = false; $('#chEnd').hidden = true; $('#chPromo').hidden = true;
   chSetupPaint(); chPaint();
@@ -1826,9 +2059,7 @@ function chPaint() {
   } else { undo.textContent = '↶ Буцаах'; undo.disabled = !chCanUndo(g); }
   resign.disabled = !g.started || !!g.over;
   resign.textContent = resignArm ? 'Итгэлтэй юу?' : 'Бууж өгөх';
-  const inv = cq && !chRunning() && !shown('chSetup') ? chIncoming()[0] : null, ib = $('#chInvite');
-  ib.hidden = !inv;
-  if (inv) ib.replaceChildren(el('span', 'nm', cqName(inv.k) + ' таныг шатар тоглохыг урьж байна.'), chBtn('Харах', 'btn', () => { chCfg.mode = 'net'; chSetup(); }));
+  toastRender();
 }
 
 /* input: tap a piece then a square, or drag */
@@ -1928,7 +2159,7 @@ function chessKey(e) {
 }
 
 /* ---------- Шатар: онлайн (өрөө «chess»; тоглолтын байдал presence-д) ---------- */
-let cq = null, cqPeers = [], cqJoining = false;
+let cq = null, cqPeers = [], cqJoining = false, cqRoom = '', chForceRoom = '';   // chForceRoom: the inviter's chess room, used after accepting
 const cqMe = { nick: null, inv: null, g: null }, cqNo = new Set();
 const pkey = p => p.by || p.peer;
 function cqKey() { const p = cqPeers.find(x => x.isMe); return p ? pkey(p) : (me.uid || ''); }
@@ -1943,16 +2174,17 @@ const validInv = x => !!x && isId(x.id, 12) && isId(x.to) && isId(x.w) && (x.tou
 async function chJoinRoom() {
   if (cq || cqJoining || !room) return;
   cqJoining = true;
-  let r = null; try { r = await room.join(roomName('chess')); } catch {}
+  const name = chForceRoom || roomName('chess');
+  let r = null; try { r = await room.join(name); } catch {}
   cqJoining = false;
   if (!r) { chRefresh(); return; }
-  if (chessv.hidden) { r.leave().catch(() => {}); return; }
-  cq = r; cqPeers = r.peers();
+  if (chessv.hidden || (chForceRoom && chForceRoom !== name)) { r.leave().catch(() => {}); if (!chessv.hidden) chJoinRoom(); return; }
+  cq = r; cqRoom = name; cqPeers = r.peers();
   r.onPeers(ch => { cqPeers = ch.peers; chNetSync(); }, () => { cq = null; cqPeers = []; chRefresh(); });
   cqMe.nick = LS.get('nick', '') || null;
   chPub(); chNetSync();
 }
-function chLeaveRoom() { if (cq) { cq.leave().catch(() => {}); cq = null; cqPeers = []; } }
+function chLeaveRoom() { if (cq) { cq.leave().catch(() => {}); cq = null; cqPeers = []; cqRoom = ''; } }
 function chPub() { if (cq) cq.presence(cqMe).catch(() => {}); }
 function chNetPub(g) {
   cqMe.g = { id: g.net.id, w: g.net.w, b: g.net.b, mv: chUcis(g).join(' '), tour: g.net.tour, pair: g.net.pair, end: g.net.end || null, draw: !!g.net.myDraw };
@@ -1969,7 +2201,7 @@ function chNetSync() {
     else if (!x.end && !cqNo.has(x.id) && ((cqMe.inv && cqMe.inv.id === x.id) || !chRunning())) { chNetAdopt(x); return; }
   }
   if (g && g.mode === 'watch') chWatchSync(g);
-  chRefresh();
+  chRefresh(); toastRender();
 }
 function chNetAdopt(x) {
   const myK = cqKey(), col = x.w === myK ? 'w' : 'b';
@@ -1979,7 +2211,8 @@ function chNetAdopt(x) {
   if (!chReplay(g, x.mv ? x.mv.split(' ') : []) || g.over) { cqNo.add(x.id); return; }
   clearTimeout(chTimer);
   chs = g; cqMe.inv = null; chNetPub(g);
-  chHide(); chPaint(); sfx('good');
+  if (toastNote && toastNote.gid === x.id) toastNote = null;
+  chHide(); chPaint(); sfx('good'); toastRender();
 }
 function chNetMerge(g, x) {
   g.net.oppDraw = !!x.draw && !x.end;
@@ -2011,17 +2244,125 @@ function chIncoming() {
     if (chs && chs.mode === 'net' && chs.net.id === inv.id) continue;
     if (!out.some(o => o.inv.id === inv.id)) out.push({ inv, k });
   }
+  for (const [k, v] of invIn) {   // stored invites reach every page, and wait while the site is closed
+    if (cqNo.has(v.id) || (chs && chs.mode === 'net' && chs.net.id === v.id) || out.some(o => o.inv.id === v.id)) continue;
+    out.push({ inv: { to: myK, id: v.id, w: v.w, tour: v.tour, pair: v.pair, room: v.room }, k });
+  }
   return out;
 }
 function chInvite(k, tour, pair, wk) {
   const myK = cqKey();
   cqMe.inv = { to: k, id: rid(), w: wk || (Math.random() < 0.5 ? myK : k), tour: tour || null, pair: pair || null };
-  chPub(); sfx('tick'); chSetupPaint();
+  chPub(); sfx('tick');
+  invSend(k, cqMe.inv);
+  chSetupPaint();
+}
+function chCancelInvite(k) {
+  if (cqMe.inv && cqMe.inv.to === k) { cqMe.inv = null; chPub(); }
+  invCancel(k); sfx('tick'); chSetupPaint();
 }
 function chAccept(inv, fromK) {
-  const myK = cqKey();
+  const myK = cqKey(), target = inv.room || roomName('chess');
+  invReply(fromK, inv.id, 'ok');
+  if (chessv.hidden) { chForceRoom = target; openAny('chess'); }
+  else if (cq ? cqRoom !== target : !cqJoining) { chLeaveRoom(); chForceRoom = target; chJoinRoom(); }
   chQuitNet();
   chNetAdopt({ id: inv.id, w: inv.w, b: inv.w === myK ? fromK : myK, mv: '', tour: inv.tour || null, pair: inv.pair || null });
+}
+function chDecline(inv, fromK) { invReply(fromK, inv.id, 'no'); cqNo.add(inv.id); sfx('tick'); toastRender(); chRefresh(); }
+
+/* ---------- шатрын урилга (db chinv/<хүлээн авагч>/in/<илгээгч>): any page, kept until answered or cancelled ---------- */
+const INV_TTL = 24 * 3600e3;
+let invIn = new Map(), invOff = null, toastNote = null, toastTimer = 0;
+let sent = (LS.get('chsent', []) || []).filter(s => s && isId(s.to) && isId(s.id, 12) && Date.now() - s.at < INV_TTL);
+const sentOff = new Map(), sentState = new Map();   // recipient -> { id, tour, pair }
+function invListen() {
+  if (invOff || !db || !me.uid) return;
+  invOff = db.collection('chinv/' + me.uid + '/in').onSnapshot(s => {
+    const m = new Map(), now = Date.now();
+    for (const d of s.docs) {
+      const v = d.data(), from = d.id;
+      if (!v || !isId(v.id, 12) || from === me.uid || (v.w !== from && v.w !== me.uid)) continue;
+      if (now - (v.at || 0) > INV_TTL) { db.doc('chinv/' + me.uid + '/in/' + from).delete().catch(() => {}); continue; }
+      if (v.reply) continue;
+      m.set(from, { id: v.id, w: v.w, tour: isId(v.tour, 12) ? v.tour : null, pair: /^\d{1,2}-\d{1,2}$/.test(v.pair || '') ? v.pair : null,
+        room: /^[a-z0-9-]{1,24}$/.test(v.room || '') ? v.room : 'chess', at: v.at });
+    }
+    const fresh = [...m].some(([f, v]) => !invIn.has(f) || invIn.get(f).id !== v.id);
+    invIn = m;
+    loadNames([...m.keys()]).then(n => { if (n) toastRender(); });
+    if (fresh) sfx('good');
+    toastRender(); chRefresh();
+  }, () => { invOff = null; });
+  sentWatch();
+}
+function invSend(to, inv) {
+  if (!db || !me.uid || !canWrite || to === me.uid) return;
+  const v = { id: inv.id, w: inv.w, tour: inv.tour || null, pair: inv.pair || null, room: cqRoom || roomName('chess'), at: Date.now(), reply: null };
+  db.doc('chinv/' + to + '/in/' + me.uid).set(v).then(() => {
+    sent = sent.filter(x => x.to !== to).concat([{ to, id: v.id, at: v.at }]);
+    LS.set('chsent', sent);
+    sentState.set(to, { id: v.id, tour: v.tour, pair: v.pair });
+    sentWatch(); chRefresh();
+  }).catch(() => {});
+}
+function sentDrop(to) {
+  const off = sentOff.get(to); if (off) { try { off(); } catch {} sentOff.delete(to); }
+  sent = sent.filter(x => x.to !== to); LS.set('chsent', sent); sentState.delete(to);
+}
+function invCancel(to) {
+  if (db && me.uid && sentState.has(to)) db.doc('chinv/' + to + '/in/' + me.uid).delete().catch(() => {});
+  sentDrop(to);
+}
+function invReply(from, id, reply) {
+  const v = invIn.get(from);
+  if (db && me.uid && v && v.id === id) db.doc('chinv/' + me.uid + '/in/' + from).update({ reply }).catch(() => {});
+  invIn.delete(from);
+}
+// the sender watches each open invite: answered → tell them and remove it; gone or too old → forget it
+function sentWatch() {
+  if (!db || !me.uid) return;
+  for (const s of sent) {
+    if (sentOff.has(s.to)) continue;
+    const ref = db.doc('chinv/' + s.to + '/in/' + me.uid);
+    sentOff.set(s.to, ref.onSnapshot(snap => {
+      const d = snap.exists ? snap.data() : null;
+      if (!d || d.id !== s.id) { sentDrop(s.to); chRefresh(); return; }
+      if (!sentState.has(s.to)) sentState.set(s.to, { id: d.id, tour: d.tour || null, pair: d.pair || null });
+      if (Date.now() - (d.at || 0) > INV_TTL) { ref.delete().catch(() => {}); sentDrop(s.to); chRefresh(); return; }
+      if (d.reply !== 'ok' && d.reply !== 'no') return;
+      ref.delete().catch(() => {}); sentDrop(s.to);
+      loadNames([s.to]).then(() => {
+        const nm = cqName(s.to);
+        if (d.reply === 'no') {
+          if (cqMe.inv && cqMe.inv.id === s.id) { cqMe.inv = null; chPub(); }
+          toastNote = { text: nm + ' урилгаас татгалзлаа.' };
+        } else if (!(chs && chs.mode === 'net' && chs.net.id === s.id)) {
+          toastNote = { gid: s.id, text: nm + ' урилгыг тань хүлээн авлаа.', act: ['Хөлөг рүү', () => { toastNote = null; toastRender(); if (chessv.hidden) openAny('chess'); }] };
+        }
+        sfx(d.reply === 'ok' ? 'good' : 'bad');
+        clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastNote = null; toastRender(); }, 20000);
+        toastRender(); chRefresh();
+      });
+    }, () => {}));
+  }
+}
+const invStatus = k => (sentState.has(k) || (cqMe.inv && cqMe.inv.to === k) ? 'Урилга илгээсэн, хариу хүлээж байна…' : '');
+function toastRender() {
+  const box = $('#toast');
+  const inc = chIncoming()[0];
+  box.replaceChildren();
+  if (inc) {
+    const meWhite = inc.inv.w !== inc.k;
+    box.append(el('span', 'nm', cqName(inc.k) + ' таныг шатар тоглохыг урьж байна' + (inc.inv.tour ? ' (тэмцээн)' : '') + '. Та ' + (meWhite ? 'цагаанаар' : 'хараар') + ' тоглоно.'),
+      chBtn('Хүлээн авах', 'btn', () => { sfx('good'); chAccept(inc.inv, inc.k); toastRender(); }),
+      chBtn('Татгалзах', 'btn ghost', () => chDecline(inc.inv, inc.k)));
+  } else if (toastNote) {
+    box.append(el('span', 'nm', toastNote.text));
+    if (toastNote.act) box.append(chBtn(toastNote.act[0], 'btn', toastNote.act[1]));
+    box.append(chBtn('Хаах', 'btn ghost', () => { toastNote = null; toastRender(); }));
+  }
+  box.hidden = !box.childElementCount;
 }
 function chWatch(x) {
   const g = chNew('watch', 1, 'w', false);
@@ -2044,25 +2385,32 @@ function chInvitesInto(box) {
   for (const { inv, k } of chIncoming()) {
     const meWhite = inv.w !== k;
     box.append(chRow(cqName(k) + ' таныг урьж байна', (inv.tour ? 'Тэмцээний тоглолт · ' : '') + 'Та ' + (meWhite ? 'цагаанаар' : 'хараар') + ' тоглоно',
-      chBtn('Зөвшөөрөх', 'btn', () => chAccept(inv, k)), chBtn('Татгалзах', 'btn ghost', () => { cqNo.add(inv.id); chRefresh(); })));
+      chBtn('Зөвшөөрөх', 'btn', () => chAccept(inv, k)), chBtn('Татгалзах', 'btn ghost', () => chDecline(inv, k))));
   }
 }
 function bodyNet(box) {
   if (!online || !room) { box.append(el('p', 'note', online ? 'Онлайн тоглолт холбогдсонгүй (' + RECONNECT + ').' : 'Онлайн тоглолт зөвхөн онлайн хувилбарт ажиллана.')); return; }
   if (!cq) { box.append(el('p', 'note', 'Шатрын өрөөнд холбогдож байна…')); chJoinRoom(); return; }
-  const myK = cqKey();
+  const myK = cqKey(), stored = !!(db && me.uid && canWrite);
   chInvitesInto(box);
-  box.append(el('h4', 'chh', 'Шатрыг нээсэн хүмүүс'));
-  const seen = new Set();
+  // everyone on the site right now; with stored invites the invite reaches them on any page
+  box.append(el('h4', 'chh', 'Одоо сайт дээр байгаа хүмүүс'));
+  const seen = new Map();
   for (const p of cqPeers) {
-    const k = pkey(p);
-    if (p.isMe || k === myK || seen.has(k) || p.kind !== 'viewer') continue;
-    seen.add(k);
-    const x = p.presence && p.presence.g, busy = validNet(x) && !x.end && (x.w === k || x.b === k), mine = cqMe.inv && cqMe.inv.to === k;
-    box.append(chRow(cqName(k), mine ? 'Урилга илгээсэн, хүлээж байна…' : busy ? 'Тоглож байна' : 'Чөлөөтэй',
-      mine ? chBtn('Цуцлах', 'btn ghost', () => { cqMe.inv = null; chPub(); chSetupPaint(); }) : chBtn('Урих', 'btn', () => chInvite(k))));
+    const k = pkey(p), x = p.presence && p.presence.g;
+    if (!p.isMe && k !== myK && p.kind === 'viewer' && !seen.has(k)) seen.set(k, { where: 'Шатар', busy: validNet(x) && !x.end && (x.w === k || x.b === k), chess: true });
   }
-  if (!seen.size) box.append(el('p', 'note', 'Одоогоор өөр хүн алга. Хамт олондоо «Шатар → Онлайн»-ыг нээхийг хэлээрэй. Хүн орж ирэхэд энд гарна.'));
+  for (const p of (room ? room.peers() : [])) {
+    const k = pkey(p);
+    if (!p.isMe && k !== myK && p.kind === 'viewer' && !seen.has(k) && p.by) seen.set(k, { where: WHERE[p.presence && p.presence.where] || 'Нүүр', busy: false, chess: false });
+  }
+  loadNames([...seen.keys()]).then(n => { if (n) chRefresh(); });
+  for (const [k, s] of seen) {
+    const st = invStatus(k), can = s.chess || stored;
+    box.append(chRow(cqName(k), st || (s.busy ? 'Шатар тоглож байна' : s.where),
+      st ? chBtn('Цуцлах', 'btn ghost', () => chCancelInvite(k)) : can ? chBtn('Урих', 'btn', () => chInvite(k)) : null));
+  }
+  if (!seen.size) box.append(el('p', 'note', 'Одоогоор өөр хүн алга. Тэмцээний өрсөлдөгчөө «Тэмцээн» хэсгээс урьж болно: сайтаа дараа нээхэд нь урилга харагдана.'));
   const games = new Map();
   for (const p of cqPeers) {
     const x = p.presence && p.presence.g, k = pkey(p);
@@ -2072,11 +2420,41 @@ function bodyNet(box) {
     box.append(el('h4', 'chh', 'Явагдаж буй тоглолт'));
     for (const x of games.values()) box.append(chRow(cqName(x.w) + ' – ' + cqName(x.b), Math.ceil((x.mv ? x.mv.split(' ').length : 0) / 2) + ' нүүдэл', chBtn('Үзэх', 'btn ghost', () => { sfx('tick'); chWatch(x); })));
   }
-  box.append(el('p', 'note', 'Урьсан хүн тань зөвшөөрөхөд тоглолт шууд эхэлнэ. Өнгийг санамсаргүй хуваарилна, цаг хэмжихгүй.'));
+  box.append(el('p', 'note', 'Урилга нь тухайн хүнд сайтын аль ч хуудсанд харагдана. Сайтыг нээгээгүй бол дараа нээхэд нь хүлээж байна. Хүлээн авмагц тоглолт эхэлнэ. Өнгийг санамсаргүй хуваарилна, цаг хэмжихгүй.'));
 }
 
-/* ---------- Шатрын тэмцээн (db: tours/<id>, …/players/<uid>, …/games/<pair>) ---------- */
-let tours = [], toursOff = null, tour = null, tourDraft = '', tourErr = '', tourEdit = '', tourDel = '';
+/* ---------- Шатрын тэмцээн: open ones in tours/<id> (listed), coded ones in codetours/<code> (readable only with the code);
+   each has …/players/<uid> and …/games/<pair>. A tournament is named by a ref: "<id>" or "x-<code>". ---------- */
+let tours = [], toursOff = null, tour = null, tourDraft = '', tourErr = '', tourEdit = '', tourDel = '', tourCodeDraft = '';
+let tourKind = LS.get('tourKind', 'open') === 'code' ? 'code' : 'open';
+let myTours = (LS.get('mytours', []) || []).filter(r => typeof r === 'string' && /^x-[a-z0-9]{4,6}$/.test(r));
+const codedMeta = new Map(), codedOffs = new Map();
+const tourBaseOf = ref => (ref.startsWith('x-') ? 'codetours/' + ref.slice(2) : 'tours/' + ref);
+const tourCodeOf = ref => (ref.startsWith('x-') ? ref.slice(2).toUpperCase() : '');
+function rememberTour(ref) {
+  if (!ref.startsWith('x-')) return;
+  myTours = [ref, ...myTours.filter(r => r !== ref)].slice(0, 12); LS.set('mytours', myTours);
+  watchCoded();
+}
+function watchCoded() {
+  if (!db) return;
+  for (const ref of myTours) {
+    if (codedOffs.has(ref)) continue;
+    codedOffs.set(ref, db.doc(tourBaseOf(ref)).onSnapshot(s => {
+      if (s.exists) codedMeta.set(ref, Object.assign({}, s.data(), { id: ref }));
+      else { codedMeta.delete(ref); myTours = myTours.filter(r => r !== ref); LS.set('mytours', myTours); }
+      loadNames([s.exists && s.data().by]).then(n => { if (n) tourRepaint(); });
+      tourRepaint();
+    }, () => {}));
+  }
+}
+async function tourJoinCode(raw) {
+  const code = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!/^[A-Z0-9]{4,6}$/.test(code)) { tourErr = 'Тэмцээний код 4–6 үсэг, тооноос бүрдэнэ.'; tourRepaint(); return; }
+  const ref = 'x-' + code.toLowerCase(), s = await db.doc(tourBaseOf(ref)).get().catch(() => null);
+  if (!s || !s.exists) { tourErr = code + ' кодтой тэмцээн олдсонгүй.'; tourRepaint(); return; }
+  tourErr = ''; tourCodeDraft = ''; rememberTour(ref); chTourOpen(ref);
+}
 const T_ST = { join: 'Бүртгэл явагдаж байна', play: 'Явагдаж байна', done: 'Дууссан' };
 const pairId = (i, j) => 'p' + Math.min(i, j) + '-' + Math.max(i, j);
 const fmtPts = p => p % 1 ? (Math.floor(p) || '') + '½' : String(p);
@@ -2095,18 +2473,35 @@ function rrRounds(n) {   // round robin (circle method); [i, j] = i plays white
   return out;
 }
 function chTourList() {
+  watchCoded();
   if (toursOff || !db) return;
   toursOff = db.collection('tours').onSnapshot(s => {
-    tours = s.docs.map(d => Object.assign({}, d.data(), { id: d.id })).filter(t => typeof t.name === 'string' && T_ST[t.status]).sort((a, b) => (b.at || 0) - (a.at || 0));
+    const now = Date.now();
+    // finished tournaments drop off after a week, ones that never started after two
+    tours = s.docs.map(d => Object.assign({}, d.data(), { id: d.id })).filter(t => typeof t.name === 'string' && T_ST[t.status]
+      && !(t.status === 'done' && now - (t.ended || t.at || 0) > 7 * DAY) && !(t.status === 'join' && now - (t.at || 0) > 14 * DAY))
+      .sort((a, b) => (b.at || 0) - (a.at || 0));
     loadNames(tours.map(t => t.by)).then(n => { if (n) tourRepaint(); });
     tourRepaint();
   }, () => { toursOff = null; });
 }
-function chTourStop() { if (toursOff) { toursOff(); toursOff = null; } chTourClose(); }
+function chTourStop() {
+  if (toursOff) { toursOff(); toursOff = null; }
+  for (const off of codedOffs.values()) try { off(); } catch {}
+  codedOffs.clear();
+  chTourClose();
+}
 function chTourOpen(id) {
   chTourClose();
-  const t = { id, players: new Map(), games: new Map(), offs: [] }, base = 'tours/' + id;
+  const t = { id, meta: null, players: new Map(), games: new Map(), offs: [] }, base = tourBaseOf(id);
   tour = t;
+  rememberTour(id);
+  t.offs.push(db.doc(base).onSnapshot(s => {
+    if (tour !== t) return;
+    t.meta = s.exists ? Object.assign({}, s.data(), { id }) : null; t.gone = !s.exists;
+    if (t.meta) loadNames([t.meta.by]).then(n => { if (n) tourRepaint(); });
+    tourRepaint();
+  }, () => {}));
   t.offs.push(db.collection(base + '/players').onSnapshot(s => {
     if (tour !== t) return;
     t.players = new Map(s.docs.map(d => [d.id, d.data()]));
@@ -2144,9 +2539,9 @@ async function tourOnlineResult(g) {
   const [i, j] = pr.split('-').map(Number);
   const res = g.over.win === 'w' ? 'w' : g.over.win === 'b' ? 'b' : 'd';
   try {
-    const t = await db.doc('tours/' + tid).get(), d = t.exists && t.data();
+    const t = await db.doc(tourBaseOf(tid)).get(), d = t.exists && t.data();
     if (!d || d.status !== 'play' || !Array.isArray(d.order) || d.order[i] !== g.net.w || d.order[j] !== g.net.b) return false;
-    const ref = db.doc('tours/' + tid + '/games/' + pairId(i, j)), ex = await ref.get();
+    const ref = db.doc(tourBaseOf(tid) + '/games/' + pairId(i, j)), ex = await ref.get();
     if (!ex.exists) await ref.set({ w: g.net.w, b: g.net.b, res, how: 'online', by: me.uid, at: Date.now(), n: g.moves.length });
     return true;
   } catch { return false; }
@@ -2159,33 +2554,68 @@ function bodyTour(box) {
   }
   chTourList();
   if (tourErr) box.append(el('p', 'note bad', tourErr));
-  if (tour) return bodyTourOne(box, tours.find(x => x.id === tour.id));
+  if (tour) return bodyTourOne(box, tour.meta);
   if (canWrite) {
     const f = el('div', 'field'), inp = el('input');
     inp.id = 'tourName'; inp.maxLength = 60; inp.placeholder = 'Тэмцээний нэр'; inp.value = tourDraft;
     inp.oninput = () => { tourDraft = inp.value; };
     const go = chBtn('Үүсгэх', 'btn', () => {
       const name = tourDraft.trim().slice(0, 60); if (!name) { inp.focus(); return; }
-      tourDraft = ''; const id = rid();
+      tourDraft = '';
       tourDo(async () => {
-        await db.doc('tours/' + id).set({ name, by: me.uid, status: 'join', at: Date.now() });
-        await db.doc('tours/' + id + '/players/' + me.uid).set({ at: Date.now() });
-        chTourOpen(id);
+        let ref = rid();
+        if (tourKind === 'code') {
+          for (let k = 0; k < 6; k++) { ref = 'x-' + newCode().toLowerCase(); const s = await db.doc(tourBaseOf(ref)).get().catch(() => null); if (s && !s.exists) break; }
+        }
+        await db.doc(tourBaseOf(ref)).set({ name, by: me.uid, status: 'join', at: Date.now() });
+        await db.doc(tourBaseOf(ref) + '/players/' + me.uid).set({ at: Date.now() });
+        chTourOpen(ref);
       });
     });
     inp.onkeydown = e => { if (e.key === 'Enter') go.click(); };
     f.append(inp, go);
-    box.append(el('h4', 'chh', 'Шинэ тэмцээн зохиох'), f);
+    // the kind is chosen on every new tournament; «Кодгүй» is preselected
+    const s = el('div', 'seg');
+    for (const [label, v] of [['Кодгүй (нээлттэй)', 'open'], ['Кодтой (хаалттай)', 'code']]) {
+      const b = chBtn(label, '', () => { tourKind = v; LS.set('tourKind', v); sfx('tick'); chSetupPaint(); });
+      b.setAttribute('aria-pressed', String(tourKind === v)); s.append(b);
+    }
+    box.append(el('h4', 'chh', 'Шинэ тэмцээн зохиох'), s,
+      el('p', 'note', tourKind === 'open' ? 'Доорх жагсаалтад бүх хүнд харагдана.' : 'Жагсаалтад харагдахгүй. Код авсан хүн л нэгдэнэ.'), f);
   } else box.append(el('p', 'note', 'Тэмцээн үүсгэх, нэгдэхэд Contributor эрх хэрэгтэй. Эзэмшигчээс эрх аваарай.'));
-  box.append(el('h4', 'chh', 'Тэмцээнүүд'));
-  if (!tours.length) box.append(el('p', 'note', 'Одоогоор тэмцээн алга. Эхнийхийг нь зохиогоорой!'));
+  const cf = el('div', 'field'), ci = el('input');
+  ci.id = 'tourCode'; ci.maxLength = 6; ci.placeholder = 'Код'; ci.value = tourCodeDraft; ci.autocapitalize = 'characters'; ci.autocomplete = 'off';
+  ci.style.textTransform = 'uppercase';
+  ci.oninput = () => { tourCodeDraft = ci.value; };
+  const cgo = chBtn('Кодоор нээх', 'btn ghost', () => { sfx('tick'); tourJoinCode(tourCodeDraft); });
+  ci.onkeydown = e => { if (e.key === 'Enter') cgo.click(); };
+  cf.append(ci, cgo); box.append(cf);
+  const mine = myTours.map(r => codedMeta.get(r)).filter(Boolean);
+  if (mine.length) {
+    box.append(el('h4', 'chh', 'Миний кодтой тэмцээнүүд'));
+    for (const x of mine) box.append(chRow(x.name, 'Код ' + tourCodeOf(x.id) + ' · ' + T_ST[x.status] + ' · ' + nameOf(x.by), chBtn('Нээх', 'btn ghost', () => { sfx('tick'); tourErr = ''; chTourOpen(x.id); })));
+  }
+  box.append(el('h4', 'chh', 'Нээлттэй тэмцээнүүд'));
+  if (!tours.length) box.append(el('p', 'note', 'Одоогоор нээлттэй тэмцээн алга. Эхнийхийг нь зохиогоорой!'));
   for (const x of tours.slice(0, 20)) box.append(chRow(x.name, T_ST[x.status] + ' · ' + nameOf(x.by), chBtn('Нээх', 'btn ghost', () => { sfx('tick'); tourErr = ''; chTourOpen(x.id); })));
 }
 function bodyTourOne(box, t) {
   box.append(chBtns(chBtn('← Бүх тэмцээн', 'btn ghost', () => { chTourClose(); tourErr = ''; chSetupPaint(); })));
-  if (!t) { box.append(el('p', 'note', 'Тэмцээн олдсонгүй эсвэл устгагдсан.')); return; }
-  const org = t.by === me.uid, P = tour.players, joined = P.has(me.uid), base = 'tours/' + t.id;
-  box.append(el('h4', 'chh big', t.name), el('p', 'note', T_ST[t.status] + ' · Зохион байгуулагч: ' + nameOf(t.by)));
+  if (!t) { box.append(el('p', 'note', tour && tour.gone ? 'Тэмцээн олдсонгүй эсвэл устгагдсан.' : 'Ачаалж байна…')); return; }
+  const org = t.by === me.uid, P = tour.players, joined = P.has(me.uid), base = tourBaseOf(t.id), code = tourCodeOf(t.id);
+  box.append(el('h4', 'chh big', t.name), el('p', 'note', (code ? 'Кодтой тэмцээн · ' : 'Нээлттэй тэмцээн · ') + T_ST[t.status] + ' · Зохион байгуулагч: ' + nameOf(t.by)));
+  if (code) {
+    const row = el('div', 'arstat'); row.append(el('span', '', 'Код:'), el('span', 'clock', code));
+    if (FB) {
+      const link = location.origin + location.pathname.replace(/[^/]*$/, '') + '#t=' + code;
+      const copy = chBtn('Холбоос хуулах', 'btn ghost', async () => {
+        try { await navigator.clipboard.writeText(link); copy.textContent = 'Хуулагдлаа'; } catch { copy.textContent = link; }
+        setTimeout(() => { copy.textContent = 'Холбоос хуулах'; }, 2500);
+      });
+      row.append(copy);
+    }
+    box.append(row, el('p', 'note', 'Нэгдэх хүмүүст кодоо өгөөрэй. Тэд «Шатар → Тэмцээн» хэсэгт кодоо бичээд нээнэ.'));
+  }
   const list = (rows, score) => {
     const ol = el('ol', 'rows');
     rows.forEach((r, i) => { const li = el('li'); if (r.uid === me.uid) li.classList.add('me'); li.append(el('span', 'rk', String(i + 1)), el('span', 'av'), el('span', 'nm', nameOf(r.uid)), el('span', 'sc num', score(r))); ol.append(li); });
@@ -2224,16 +2654,13 @@ function bodyTourOne(box, t) {
         box.append(chRow(label, 'Дүнгээ сонгоно уу (цагаан – хар)', chBtn('1–0', 'btn ghost', () => put('w')), chBtn('½–½', 'btn ghost', () => put('d')), chBtn('0–1', 'btn ghost', () => put('b')), chBtn('Болих', 'linkbtn', () => { tourEdit = ''; chSetupPaint(); })));
         continue;
       }
-      const sent = cqMe.inv && cqMe.inv.tour === t.id && cqMe.inv.pair === i + '-' + j;
-      const oppK = me.uid === wU ? bU : wU;
-      const resTxt = ok ? (res.res === 'w' ? '1–0' : res.res === 'b' ? '0–1' : '½–½') + (res.how === 'online' ? ' · онлайн' : '') : sent ? 'Урилга илгээсэн, хүлээж байна…' : 'Тоглоогүй';
+      const oppK = me.uid === wU ? bU : wU, ss = sentState.get(oppK);
+      const sent = (ss && ss.tour === t.id && ss.pair === i + '-' + j) || (cqMe.inv && cqMe.inv.tour === t.id && cqMe.inv.pair === i + '-' + j);
+      const resTxt = ok ? (res.res === 'w' ? '1–0' : res.res === 'b' ? '0–1' : '½–½') + (res.how === 'online' ? ' · онлайн' : '') : sent ? 'Урилга илгээсэн, ' + nameOf(oppK) + '-ийн хариуг хүлээж байна…' : 'Тоглоогүй';
       box.append(chRow(label, resTxt,
-        can && !ok && inPair && cq ? (sent
-          ? chBtn('Цуцлах', 'btn ghost', () => { cqMe.inv = null; chPub(); chSetupPaint(); })
-          : chBtn('Онлайн тоглох', 'btn', () => {
-            if (!cqPeers.some(p => !p.isMe && pkey(p) === oppK)) { tourErr = nameOf(oppK) + ' одоогоор Шатрыг нээгээгүй байна. Нээсний дараа дахин дараарай.'; chSetupPaint(); return; }
-            tourErr = ''; chInvite(oppK, t.id, i + '-' + j, wU);
-          })) : null,
+        can && !ok && inPair && (cq || db) ? (sent
+          ? chBtn('Цуцлах', 'btn ghost', () => chCancelInvite(oppK))
+          : chBtn('Онлайн тоглох', 'btn', () => { tourErr = ''; chInvite(oppK, t.id, i + '-' + j, wU); })) : null,
         can && (!ok || org) ? chBtn(ok ? 'Засах' : 'Дүн оруулах', 'btn ghost', () => { tourEdit = k; chSetupPaint(); }) : null));
     }
   });

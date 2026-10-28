@@ -93,7 +93,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
 .btn:disabled{opacity:.45;cursor:default}
 
-/* puzzle */
+/* puzzle (the wrapper is full width so the board never shrinks to the width of the short "Нүүдэл: N" line) */
+#pzWrap{width:100%;display:flex;flex-direction:column;align-items:center}
 #pz{width:min(420px,100%,calc(100dvh - 190px));aspect-ratio:1;max-width:100%;position:relative;background:var(--sunk);border-radius:14px;touch-action:manipulation}
 #pz button{position:absolute;left:0;top:0;width:33.333%;height:33.333%;padding:5px;border:0;background:transparent;transition:transform .12s ease}
 #pz button span{display:grid;place-items:center;width:100%;height:100%;border-radius:10px;background:var(--surface);border:1px solid var(--line);font-family:var(--display);font-weight:800;font-size:clamp(26px,8vw,44px);box-shadow:0 3px 0 var(--line)}
@@ -196,7 +197,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .lrow .nm{flex:1 1 140px;min-width:0;font-weight:600;overflow-wrap:anywhere}
 .lrow .nm small{display:block;color:var(--muted);font-size:12px;font-weight:500}
 .lrow .btn{padding:7px 12px;font-size:13px}
-.chinv{border-color:var(--accent);background:var(--accent-soft)}
+.toast{position:fixed;left:50%;bottom:max(16px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:50;width:min(480px,calc(100% - 32px));box-sizing:border-box;display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--accent);border-radius:14px;background:var(--surface);box-shadow:0 14px 40px rgba(0,0,0,.28)}
+.toast .nm{flex:1 1 200px;font-weight:600;font-size:14px}
+.toast .btn{padding:8px 14px;font-size:13.5px}
 .note.bad{color:var(--bad)}
 /* quiz editor */
 .qed{max-width:680px}
@@ -224,6 +227,29 @@ button{font:inherit;color:inherit;cursor:pointer}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chips span{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px;background:var(--bg)}
 .chips span.me{border-color:var(--accent);background:var(--accent-soft)}
+/* Хэлэх үг */
+.notes{margin-top:24px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;display:flex;flex-direction:column;gap:10px}
+.notes .note{margin:0}
+.notes .btns{justify-content:flex-start;align-items:center}
+.ncompose{display:flex;flex-direction:column;gap:8px;max-width:640px}
+.ncompose input,.ncompose textarea,.notes .field input{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--bg);color:var(--ink);font:inherit;resize:vertical}
+.nrow{display:flex;justify-content:space-between;align-items:center;gap:10px}
+/* the notes hang on a cork board: small paper slips, each pinned with a tack and tilted a little */
+.nlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr));gap:22px 18px;padding:26px 20px 22px;border-radius:12px;border:10px solid #8A5A32;
+  background-color:#C4935F;background-image:radial-gradient(rgba(92,56,24,.38) 1px,transparent 1.6px),radial-gradient(rgba(255,236,204,.28) 1px,transparent 1.6px),radial-gradient(rgba(70,40,15,.22) 2px,transparent 2.6px);
+  background-size:13px 13px,21px 21px,37px 37px;background-position:0 0,6px 10px,17px 4px;box-shadow:inset 0 3px 12px rgba(0,0,0,.35)}
+.nlist .empty{grid-column:1/-1;color:#FFF4E2;text-shadow:0 1px 2px rgba(0,0,0,.4);text-align:center}
+.ncard{--paper:#FFF4A3;--rot:-1deg;--pin:#D03C3C;position:relative;display:flex;flex-direction:column;gap:6px;min-width:0;padding:24px 14px 10px;border-radius:2px 2px 6px 3px;
+  background:var(--paper);color:#2A2118;transform:rotate(var(--rot));box-shadow:0 1px 1px rgba(0,0,0,.15),0 8px 16px rgba(40,20,5,.35);transition:transform .15s ease}
+.ncard:hover{transform:rotate(0) translateY(-2px)}
+.ncard::before{content:"";position:absolute;top:6px;left:50%;width:15px;height:15px;margin-left:-7.5px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.85) 0 2px,var(--pin) 3.5px);box-shadow:0 3px 3px rgba(0,0,0,.4)}
+.ncard .to{font-size:12px;font-weight:700;color:#8A4B12;letter-spacing:.03em;overflow-wrap:anywhere}
+.ncard .t{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-family:"Caveat","Golos Text",cursive;font-size:22px;line-height:1.18;font-weight:600}
+.ncard .meta{display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:rgba(42,33,24,.62);margin-top:auto}
+.ncard .acts{display:flex;gap:2px;flex-wrap:wrap}
+.ncard .linkbtn{color:rgba(42,33,24,.7);font-weight:600}
+.ncard.hid{opacity:.6;outline:2px dashed rgba(42,33,24,.5);outline-offset:-6px}
 .ov.namedlg{position:fixed;z-index:40}
 .namedlg .field input{text-align:center;font-size:17px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}

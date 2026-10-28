@@ -57,6 +57,10 @@ $markup
 
 New-Item -ItemType Directory -Force $Out | Out-Null
 $changed = @()
+# stand-alone pages copied as they are (the 3D shooter loads three.js and Firebase itself)
+foreach ($page in @('buudlaga.html')) {
+  $files[$page] = [IO.File]::ReadAllText((Join-Path $PSScriptRoot $page), [Text.Encoding]::UTF8)
+}
 # Firebase web config is hand-edited (pasted from the Firebase console); only create the empty stub
 $cfg = Join-Path $Out 'firebase-config.js'
 if (-not (Test-Path -LiteralPath $cfg)) {
