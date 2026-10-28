@@ -75,11 +75,11 @@ button.seat.free:hover{border-color:var(--accent);color:var(--ink)}
 .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .cardbtn{display:flex;flex-direction:column;align-items:center;gap:2px;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:7px 2px;font-size:11.5px;font-weight:600;line-height:1.15;text-align:center}
 .cardbtn .ic{font-size:20px;line-height:1}
-.cardbtn:not(:disabled):hover{border-color:var(--accent)}
+.cardbtn:not(.off):hover{border-color:var(--accent)}
 .cardbtn.on{border-color:var(--accent);background:var(--accent-soft)}
 .cardbtn.used{opacity:.35;text-decoration:line-through}
-.cardbtn:disabled{cursor:default}
-.cardbtn:disabled:not(.used){opacity:.6}
+.cardbtn.off{cursor:help}
+.cardbtn.off:not(.used){opacity:.6}
 .pl .ck{font-size:12px;letter-spacing:1px;white-space:nowrap}
 .pl .ck i{font-style:normal}
 .pl .ck i.used{opacity:.22}
@@ -419,14 +419,28 @@ function paintSide() {
     for (const s of SKILLS) {
       const has = mineC >= 0 && hasCard(G, mineC, s.k), b = el('button', 'cardbtn' + (has ? '' : ' used') + (pickCard === s.k ? ' on' : ''));
       b.type = 'button'; b.title = s.n + ': ' + s.d; b.append(el('span', 'ic', s.i), el('span', '', s.n));
-      b.disabled = !me || busy || !!anim || !canSkill(G, G.t, s.k);
-      b.onclick = () => useCard(s.k);
+      const off = !me || busy || !!anim || !canSkill(G, G.t, s.k);   // not disabled: a tap on a card that can't be played says why
+      b.classList.toggle('off', off); b.setAttribute('aria-disabled', String(off));
+      b.onclick = () => (off ? flash(cardWhyNot(s, mineC)) : useCard(s.k));
       bar.append(b);
     }
   }
   $('#modeLbl').textContent = mode === 'net' ? 'Ширээ · ' + (CODE ? 'өрөө ' + CODE : 'нийтийн') : mode === 'local' ? 'Нэг дэлгэцээр' : 'Компьютертэй';
 }
 let busy = false, pickCard = null;   // pickCard: 'shield' | 'launch' while the player chooses the token for it
+function cardWhyNot(s, c) {
+  const S = G, n = s.i + ' ' + s.n + ': ';
+  if (!S || S.w >= 0) return n + 'тоглоом дууссан.';
+  if (c < 0 || !hasCard(S, c, s.k)) return n + 'энэ картыг аль хэдийн ашигласан.';
+  if (!isMine(S.t)) return n + 'өөрийн ээлжинд ашиглана.';
+  if (busy || anim) return n + 'түр хүлээгээрэй.';
+  if (s.k === 'launch') return n + (S.d ? 'шоо хаяхаас өмнө л ашиглана.' : 'сууринд бөмбөг алга.');
+  if (s.k === 'shield') return n + 'замд байгаа бөмбөгт л тавина (суурь, гэрийн эгнээнд биш).';
+  if (!S.d) return n + 'эхлээд шоогоо хая.';
+  if (S.x) return n + 'энэ хаялтад карт аль хэдийн ашигласан.';
+  if (s.k === 'double') return n + S.o + ' × 2 = ' + S.o * 2 + ' алхах нүүдэл алга.';
+  return n + 'одоо ашиглах боломжгүй.';
+}
 function show(S, why) {   // put a new state on screen, animating the token that moved
   const prev = G;
   if (prev && S && S.n === prev.n + 1 && why && why.c != null) {
