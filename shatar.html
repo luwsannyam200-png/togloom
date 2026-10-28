@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Шатар · Цайны цаг</title>
-<meta name="description" content="Завсарлагын богино тоглоомууд: Болжмор, Карьерын зам, Таавар 3×3, Мэдлэгийн сорил, Шатар, Буудлага, Блок тулаан, CS2 академи.">
+<meta name="description" content="Завсарлагын богино тоглоомууд: Болжмор, Карьерын зам, Таавар 3×3, Мэдлэгийн сорил, Шатар, Буудлага, Блок тулаан, Лудо, Нууц хорлогч, CS2 академи.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23E8780A'/%3E%3Ctext x='32' y='45' font-size='36' text-anchor='middle' font-family='Arial' font-weight='700' fill='%2317202B'%3E%D0%A6%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700;800&display=swap">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="app.css?v=0545c3da1a">
 </head>
 <body data-start="chess">
 <div class="wrap hub" id="hub">
@@ -23,7 +23,7 @@
     <div class="who">
       <div class="online" id="online" title="Энэ хуудсыг яг одоо нээсэн хүмүүс"><span class="dot"></span><span class="faces" id="faces"></span><span id="onlineTxt">Ганцаараа</span></div>
       <button class="iconbtn" id="nameBtn" type="button" hidden>Нэр</button>
-      <button class="iconbtn" id="mute" type="button">Дуу: асаалттай</button>
+      <button class="iconbtn" id="mute" type="button" aria-label="Дуу асаалттай" title="Дуу асаалттай">🔊</button>
     </div>
   </header>
 
@@ -37,8 +37,8 @@
           <g font-family="Unbounded, sans-serif" font-weight="800" font-size="30" fill="#FF9426"><text x="22" y="62">?</text><text x="196" y="50">!</text></g>
           <g><circle cx="70" cy="82" r="16" fill="#F2BA30"/><circle cx="108" cy="74" r="18" fill="#E8780A"/><circle cx="148" cy="80" r="16" fill="#3CC57A"/><circle cx="184" cy="86" r="14" fill="#AAB6C3"/></g>
           <g fill="#1F3A5C"><circle cx="64" cy="79" r="2.4"/><circle cx="76" cy="79" r="2.4"/><circle cx="101" cy="70" r="2.6"/><circle cx="115" cy="70" r="2.6"/><circle cx="142" cy="77" r="2.4"/><circle cx="154" cy="77" r="2.4"/><circle cx="179" cy="83" r="2.2"/><circle cx="189" cy="83" r="2.2"/></g>
-          <rect x="18" y="104" width="64" height="16" rx="8" fill="#D03C3C"/><text x="50" y="116" text-anchor="middle" font-family="Golos Text, sans-serif" font-weight="700" font-size="10" fill="#fff">LIVE</text>
         </svg>
+        <span class="livebadge" id="liveBadge" hidden><i></i><span id="liveN"></span></span>
         <span class="meta">
           <span class="chip">Багаараа</span>
           <span class="t">Хамтдаа сорил</span>
@@ -154,6 +154,43 @@
         </span>
       </button>
 
+      <button class="tile wide" type="button" data-open="ludo">
+        <svg class="art" viewBox="0 0 240 132" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <rect width="240" height="132" fill="#F4EFE6"/>
+          <rect x="0" y="0" width="54" height="54" fill="#E0483E"/><rect x="186" y="0" width="54" height="54" fill="#2FA35B"/><rect x="186" y="78" width="54" height="54" fill="#F2B90C"/><rect x="0" y="78" width="54" height="54" fill="#2F7FD9"/>
+          <g fill="#fff"><rect x="9" y="9" width="36" height="36" rx="6"/><rect x="195" y="9" width="36" height="36" rx="6"/><rect x="195" y="87" width="36" height="36" rx="6"/><rect x="9" y="87" width="36" height="36" rx="6"/></g>
+          <g fill="#E0483E"><circle cx="20" cy="20" r="5"/><circle cx="34" cy="34" r="5"/></g><g fill="#2FA35B"><circle cx="206" cy="20" r="5"/></g><g fill="#2F7FD9"><circle cx="20" cy="98" r="5"/><circle cx="34" cy="112" r="5"/></g>
+          <g stroke="#D7CFC0" stroke-width="1.5" fill="#fff"><rect x="54" y="54" width="132" height="24"/></g>
+          <path d="M100 66h40" stroke="#E0483E" stroke-width="10"/>
+          <rect x="96" y="22" width="48" height="48" rx="10" fill="#fff" stroke="#17202B" stroke-width="3" transform="rotate(-12 120 46)"/>
+          <g fill="#17202B" transform="rotate(-12 120 46)"><circle cx="108" cy="34" r="4"/><circle cx="120" cy="46" r="4"/><circle cx="132" cy="58" r="4"/></g>
+        </svg>
+        <span class="meta">
+          <span class="chip">Онлайн</span>
+          <span class="t">Лудо</span>
+          <span class="d">2–4 хүн шоо хаяж дөрвөн бөмбөгөө гэрт нь хүргэнэ. Онлайн ширээнд, компьютертэй эсвэл нэг дэлгэцээр.</span>
+          <span class="foot"><span>Цуглуулсан: <b class="num" data-best="ludo">—</b></span><b>Тоглох →</b></span>
+        </span>
+      </button>
+
+      <button class="tile wide" type="button" data-open="imp">
+        <svg class="art" viewBox="0 0 240 132" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <rect width="240" height="132" fill="#0E1318"/>
+          <radialGradient id="impLamp" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#2E3B4B"/><stop offset="1" stop-color="#0E1318"/></radialGradient>
+          <circle cx="120" cy="70" r="80" fill="url(#impLamp)"/>
+          <g transform="translate(78 74)"><rect x="-12" y="-4" width="24" height="22" rx="7" fill="#2F6FE0"/><circle cy="-11" r="9" fill="#F2D2B0"/><path d="M-11-13a11 11 0 0 1 22 0z" fill="#2F6FE0"/><circle cy="-20" r="2.6" fill="#FFE27A"/></g>
+          <g transform="translate(162 74)"><rect x="-12" y="-4" width="24" height="22" rx="7" fill="#2FA35B"/><circle cy="-11" r="9" fill="#F2D2B0"/><path d="M-11-13a11 11 0 0 1 22 0z" fill="#2FA35B"/><circle cy="-20" r="2.6" fill="#FFE27A"/></g>
+          <g transform="translate(120 62)"><rect x="-12" y="-4" width="24" height="22" rx="7" fill="#D93B3B"/><circle cy="-11" r="9" fill="#F2D2B0"/><path d="M-11-13a11 11 0 0 1 22 0z" fill="#D93B3B"/><circle cy="-20" r="2.6" fill="#FFE27A"/></g>
+          <text x="120" y="122" text-anchor="middle" font-family="Unbounded, sans-serif" font-weight="800" font-size="22" fill="#F06868">?</text>
+        </svg>
+        <span class="meta">
+          <span class="chip">Онлайн · 4–10 хүн</span>
+          <span class="t">Нууц хорлогч</span>
+          <span class="d">Уурхайн баазад даалгавраа хий, дундаас чинь нууц хорлогчийг хурал хийж санал хурааж ол.</span>
+          <span class="foot"><span>Цуглуулсан: <b class="num" data-best="imp">—</b></span><b>Тоглох →</b></span>
+        </span>
+      </button>
+
       <button class="tile wide" type="button" data-open="cs2">
         <svg class="art" viewBox="0 0 240 132" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           <rect width="240" height="132" fill="#141B23"/>
@@ -183,17 +220,26 @@
     <aside class="board" aria-label="Шилдэг оноо">
       <h2>Шилдэг оноо</h2>
       <div class="tabs" id="tabs">
-        <button type="button" data-tab="flappy" aria-pressed="true">Болжмор</button>
-        <button type="button" data-tab="race" aria-pressed="false">Карьер</button>
-        <button type="button" data-tab="puzzle" aria-pressed="false">Таавар</button>
-        <button type="button" data-tab="quiz" aria-pressed="false">Сорил</button>
-        <button type="button" data-tab="chess" aria-pressed="false">Шатар</button>
-        <button type="button" data-tab="fps" aria-pressed="false">Буудлага</button>
-        <button type="button" data-tab="blok" aria-pressed="false">Блок</button>
-        <button type="button" data-tab="cs2" aria-pressed="false">CS2</button>
+        <button type="button" data-tab="team" aria-pressed="false">👥 Баг</button>
+        <button type="button" data-tab="flappy" aria-pressed="true">🐦 Болжмор</button>
+        <button type="button" data-tab="race" aria-pressed="false">🚚 Карьер</button>
+        <button type="button" data-tab="puzzle" aria-pressed="false">🧩 Таавар</button>
+        <button type="button" data-tab="quiz" aria-pressed="false">❓ Сорил</button>
+        <button type="button" data-tab="chess" aria-pressed="false">♟️ Шатар</button>
+        <button type="button" data-tab="fps" aria-pressed="false">🎯 Буудлага</button>
+        <button type="button" data-tab="blok" aria-pressed="false">🧱 Блок</button>
+        <button type="button" data-tab="ludo" aria-pressed="false">🎲 Лудо</button>
+        <button type="button" data-tab="imp" aria-pressed="false">🕵️ Хорлогч</button>
+        <button type="button" data-tab="cs2" aria-pressed="false">💣 CS2</button>
+      </div>
+      <div class="per" id="per" role="group" aria-label="Хугацаа">
+        <button type="button" data-per="day">Өнөөдөр</button>
+        <button type="button" data-per="week">Энэ 7 хоног</button>
+        <button type="button" data-per="all">Бүх цаг</button>
       </div>
       <ol class="rows" id="rows"></ol>
       <p class="empty" id="boardEmpty">Одоогоор оноо алга. Эхлээд тоглоод самбарт гараарай.</p>
+      <div class="boardcta" id="boardCta" hidden></div>
       <p class="note" id="boardNote">Багийн самбар холбогдож байна…</p>
     </aside>
  </div>
@@ -236,6 +282,8 @@
 </section>
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<div class="ann" id="ann" role="status" aria-live="polite" hidden></div>
+<canvas id="confetti" hidden></canvas>
 
 <div class="ov dim namedlg" id="nameDlg" hidden><div class="card pcard">
   <h3 id="pfTitle">Профайл</h3>
@@ -248,6 +296,7 @@
   <div class="pfsec"><b>Дуртай тоглоом</b><div class="pfopts" id="pfGame"></div></div>
   <div class="pfsec"><b>Төлөв</b><div class="pfopts" id="pfStat"></div></div>
   <div class="pfsec"><b>Тоглодог цаг</b><div class="pfopts" id="pfTime"></div></div>
+  <div class="pfsec"><b>Баг</b><input id="pfTeam" maxlength="20" placeholder="Багийн нэр (заавал биш)" autocomplete="off"><div class="pfopts" id="pfTeams"></div><span class="pfhint">Ижил нэр бичсэн хүмүүс нэг баг болж, онооны самбарын «Баг» хэсэгт хамтдаа өрсөлдөнө.</span></div>
   <p class="pferr" id="pfErr"></p>
   <div class="btns"><button class="btn" type="button" id="nameOk">Хадгалах</button><button class="btn ghost" type="button" id="nameX" hidden>Болих</button></div>
 </div></div>
@@ -296,6 +345,6 @@
   </div>
 </section>
 <script src="firebase-config.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=cace5fd34b"></script>
 </body>
 </html>

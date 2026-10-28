@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Лудо · Цайны цаг</title>
+<meta name="description" content="Лудо: 2–4 хүн шоо хаяж, дөрвөн бөмбөгөө гэрт нь хүргэнэ. Компьютертэй, нэг дэлгэцээр эсвэл онлайн ширээнд олуулаа.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23E8780A'/%3E%3Crect x='14' y='14' width='36' height='36' rx='8' fill='%23fff'/%3E%3Cg fill='%2317202B'%3E%3Ccircle cx='24' cy='24' r='4'/%3E%3Ccircle cx='32' cy='32' r='4'/%3E%3Ccircle cx='40' cy='40' r='4'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@700;800&display=swap">
+<style>
+/* Layout: square board left, players + dice panel right (under the board on phones); overlay card for setup and lobby. */
+:root{--bg:#EDF1F4;--surface:#FFFFFF;--sunk:#E3E9EE;--ink:#17202B;--muted:#596777;--line:#D2DAE1;--accent:#E8780A;--accent-ink:#1C1004;--accent-soft:#FBE4CB;--good:#1C9553;--bad:#D03C3C}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#10151C;--surface:#18202A;--sunk:#0C1117;--ink:#E6ECF2;--muted:#94A2B1;--line:#2A3440;--accent:#FF9426;--accent-ink:#1C1004;--accent-soft:#3B2914;--good:#3CC57A;--bad:#F06868;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10151C;--surface:#18202A;--sunk:#0C1117;--ink:#E6ECF2;--muted:#94A2B1;--line:#2A3440;--accent:#FF9426;--accent-ink:#1C1004;--accent-soft:#3B2914;--good:#3CC57A;--bad:#F06868;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 "Golos Text","Segoe UI",system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer}
+[hidden]{display:none!important}
+.wrap{max-width:1040px;margin:0 auto;padding:12px max(14px,env(safe-area-inset-left)) 24px max(14px,env(safe-area-inset-right));display:flex;flex-direction:column;gap:12px}
+.top{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap}
+.top h1{font-family:Unbounded,sans-serif;font-size:clamp(20px,4vw,28px);margin:0;flex:1 1 auto}
+.top h1 b{color:var(--accent)}
+.back{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 14px;font-weight:600;text-decoration:none;color:var(--ink)}
+.game{display:grid;grid-template-columns:auto minmax(230px,300px);gap:16px;justify-content:center;align-items:start}
+@media (max-width:760px){.game{grid-template-columns:1fr;justify-items:center}}
+.boardwrap{position:relative}
+#board{display:block;border-radius:14px;box-shadow:0 0 0 1px var(--line),0 16px 40px rgba(0,0,0,.14);touch-action:manipulation;cursor:pointer}
+.side{display:flex;flex-direction:column;gap:10px;width:100%}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.label{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.pl{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:8px;align-items:center;padding:6px 8px;border-radius:10px}
+.pl .dot{width:14px;height:14px;border-radius:50%}
+.pl .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.pl .hm{font-size:13px;color:var(--muted)}
+.pl.turn{background:var(--accent-soft)}
+.pl.turn .nm::after{content:" ← ээлж";color:var(--accent);font-weight:700;font-size:12px}
+.dice{display:flex;align-items:center;gap:12px}
+#die{width:72px;height:72px;border:0;padding:0;background:none;border-radius:16px;flex:none}
+#die:disabled{cursor:default;opacity:.55}
+#die svg{display:block;width:100%;height:100%}
+#die.roll svg{animation:shake .45s}
+@keyframes shake{0%{transform:rotate(0)}25%{transform:rotate(-18deg) scale(.92)}50%{transform:rotate(14deg)}75%{transform:rotate(-8deg) scale(1.05)}100%{transform:rotate(0)}}
+#hint{font-weight:600}
+.log{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:2px;max-height:120px;overflow:auto}
+.ov{position:fixed;inset:0;display:grid;place-items:center;background:color-mix(in srgb,var(--bg) 55%,transparent);padding:16px;z-index:10}
+.card{width:min(420px,100%);max-height:calc(100dvh - 32px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:10px;box-shadow:0 18px 50px rgba(0,0,0,.25)}
+.card h2{margin:0;font-family:Unbounded,sans-serif;font-size:19px;text-align:center}
+.card p{margin:0;color:var(--muted);font-size:14px;text-align:center}
+.big{font-family:Unbounded,sans-serif;font-size:30px;font-weight:800;text-align:center;color:var(--accent)}
+.btn{border:0;border-radius:12px;padding:10px 16px;font-weight:700;background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn.sm{padding:6px 11px;font-size:13.5px;border-radius:10px}
+.btn:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center}
+.seg{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+.seg button{border:1px solid var(--line);background:transparent;border-radius:999px;padding:6px 13px;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.sub{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:center}
+input{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--surface);color:var(--ink);font:inherit;width:100%}
+.tables{display:flex;flex-direction:column;gap:8px}
+.tbl{border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.tbl .hd{display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:14px}
+.tbl .hd span{color:var(--muted);font-weight:600}
+.seats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.seat{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:13.5px;min-width:0;background:transparent;text-align:left}
+.seat .dot{width:12px;height:12px;border-radius:50%;flex:none}
+.seat span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seat.free{border-style:dashed;color:var(--muted)}
+button.seat.free:hover{border-color:var(--accent);color:var(--ink)}
+.msg{font-weight:700;color:var(--accent);min-height:20px;text-align:center}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="index.html">← Цэс</a>
+    <h1><b>Лудо</b></h1>
+    <button class="btn ghost sm" type="button" id="menuBtn">Тоглоом сонгох</button>
+  </header>
+  <div class="msg" id="msg"></div>
+  <main class="game">
+    <div class="boardwrap"><canvas id="board" aria-label="Лудогийн самбар"></canvas></div>
+    <aside class="side">
+      <div class="panel">
+        <div class="dice"><button type="button" id="die" aria-label="Шоо хаях" disabled></button><div><div id="hint">—</div><p class="note" id="sub"></p></div></div>
+      </div>
+      <div class="panel">
+        <span class="label" id="modeLbl">Тоглогчид</span>
+        <div id="players"></div>
+      </div>
+      <div class="panel"><span class="label">Явц</span><div class="log" id="log"></div></div>
+    </aside>
+  </main>
+</div>
+<div class="ov" id="ov" hidden><div class="card" id="card"></div></div>
+
+<script src="firebase-config.js"></script>
+<script type="module">
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+const btn = (label, cls, fn) => { const b = el('button', cls, label); b.type = 'button'; b.onclick = fn; return b; };
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('tsai:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('tsai:' + k, JSON.stringify(v)); } catch {} },
+};
+const rid = () => Math.random().toString(36).slice(2, 10);
+let myName = String(LS.get('nick', '') || '').trim().slice(0, 24);
+const CODE = ((location.hash.match(/r=([A-Za-z0-9]{4,6})/) || [])[1] || '').toUpperCase();
+const M = CODE || 'pub';
+if (CODE) $('.back').href = 'index.html#r=' + CODE;
+let actx = null;
+function sfx(kind) {
+  if (LS.get('mute', false)) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+    const f = { roll: 260, step: 520, cap: 140, home: 880, six: 660, win: 1040, turn: 440 }[kind] || 400;
+    o.type = kind === 'cap' ? 'sawtooth' : 'triangle';
+    o.frequency.setValueAtTime(f, t);
+    if (kind === 'home' || kind === 'win' || kind === 'six') o.frequency.exponentialRampToValueAtTime(f * 1.5, t + 0.15);
+    const len = kind === 'step' ? 0.05 : kind === 'win' ? 0.4 : 0.14;
+    g.gain.setValueAtTime(kind === 'step' ? 0.03 : 0.07, t); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len + 0.05);
+  } catch {}
+}
+let flashT = 0;
+function flash(t) { $('#msg').textContent = t; clearTimeout(flashT); flashT = setTimeout(() => { $('#msg').textContent = ''; }, 2600); }
+
+/* ---------- rules: 52-square loop on a 15×15 board, colours 0 red (top-left), 1 green, 2 yellow, 3 blue, clockwise ----------
+   a token's place is its distance from its own start: -1 base, 0–50 loop, 51–55 home lane, 56 home. */
+const COL = [
+  { n: 'Улаан', c: '#E0483E', d: '#A92F27', l: '#F7C9C5' },
+  { n: 'Ногоон', c: '#2FA35B', d: '#1F7440', l: '#C5E9D2' },
+  { n: 'Шар', c: '#F2B90C', d: '#B38600', l: '#FBE9AE' },
+  { n: 'Цэнхэр', c: '#2F7FD9', d: '#1F5CA3', l: '#C7DCF5' },
+];
+const START = [0, 13, 26, 39], SAFE = new Set([0, 8, 13, 21, 26, 34, 39, 47]), END = 56;
+const PATH = (() => {
+  const p = [];
+  for (let x = 1; x <= 5; x++) p.push([x, 6]);
+  for (let y = 5; y >= 0; y--) p.push([6, y]);
+  p.push([7, 0], [8, 0]);
+  for (let y = 1; y <= 5; y++) p.push([8, y]);
+  for (let x = 9; x <= 14; x++) p.push([x, 6]);
+  p.push([14, 7], [14, 8]);
+  for (let x = 13; x >= 9; x--) p.push([x, 8]);
+  for (let y = 9; y <= 14; y++) p.push([8, y]);
+  p.push([7, 14], [6, 14]);
+  for (let y = 13; y >= 9; y--) p.push([6, y]);
+  for (let x = 5; x >= 0; x--) p.push([x, 8]);
+  p.push([0, 7], [0, 6]);
+  return p;
+})();
+const LANE = [[1, 7, 1, 0], [7, 1, 0, 1], [13, 7, -1, 0], [7, 13, 0, -1]].map(([x, y, dx, dy]) => Array.from({ length: 5 }, (_, i) => [x + dx * i, y + dy * i]));
+const FIN = [[6.35, 7.5], [7.5, 6.35], [8.65, 7.5], [7.5, 8.65]];
+const BASE = [[0, 0], [9, 0], [9, 9], [0, 9]];
+const sq = (c, r) => (START[c] + r) % 52;
+function spot(c, i, r) {   // centre of a token in cell units
+  if (r < 0) { const [bx, by] = BASE[c]; return [bx + (i % 2 ? 4.2 : 1.8), by + (i < 2 ? 1.8 : 4.2)]; }
+  if (r <= 50) { const [x, y] = PATH[sq(c, r)]; return [x + 0.5, y + 0.5]; }
+  if (r < END) { const [x, y] = LANE[c][r - 51]; return [x + 0.5, y + 0.5]; }
+  return FIN[c];
+}
+// S = { k tokens each, on: [colours playing], p: [[r × 4] × 4], t: whose turn, d: roll (0 = must roll), s: sixes in a row, w: winner (-1), n: move count }
+function newGame(on, k) {
+  const p = [0, 1, 2, 3].map(() => [-1, -1, -1, -1].map((v, i) => (i < k ? -1 : END)));   // unused tokens sit at home
+  return { k, on: on.slice().sort(), p, t: Math.min(...on), d: 0, s: 0, w: -1, n: 0 };
+}
+const clone = S => ({ ...S, on: S.on.slice(), p: S.p.map(a => a.slice()) });
+function legal(S, c, d) {
+  const out = [];
+  S.p[c].forEach((r, i) => { if (r < 0 ? d === 6 : r < END && r + d <= END) out.push(i); });
+  return out;
+}
+function move(S0, c, i, d) {   // -> { S, cap: [[c,i]...], home }
+  const S = clone(S0), cap = [];
+  let r = S.p[c][i];
+  r = r < 0 ? 0 : r + d;
+  S.p[c][i] = r;
+  if (r <= 50 && !SAFE.has(sq(c, r))) {
+    const at = sq(c, r);
+    for (const o of S.on) if (o !== c) S.p[o].forEach((ro, j) => { if (ro >= 0 && ro <= 50 && sq(o, ro) === at) { S.p[o][j] = -1; cap.push([o, j]); } });
+  }
+  const home = r === END;
+  if (S.p[c].every(v => v === END)) S.w = c;
+  return { S, cap, home };
+}
+const nextOf = (S, c) => { for (let k = 1; k <= 4; k++) { const o = (c + k) % 4; if (S.on.includes(o)) return o; } return c; };
+function after(S0, c, d, res) {   // whose turn after a move
+  const S = res.S;
+  S.d = 0; S.n = S0.n + 1;
+  if (S.w >= 0) return S;
+  if (d === 6 || res.cap.length || res.home) { S.t = c; if (d !== 6) S.s = 0; }
+  else { S.t = nextOf(S, c); S.s = 0; }
+  return S;
+}
+function passTurn(S0) { const S = clone(S0); S.t = nextOf(S, S.t); S.d = 0; S.s = 0; S.n = S0.n + 1; return S; }
+// the computer's choice: finish > capture > leave base > safe or home lane > keep out of reach; then the furthest token
+function threat(S, c, r) {
+  if (r < 0 || r > 50 || SAFE.has(sq(c, r))) return 0;
+  const at = sq(c, r); let n = 0;
+  for (const o of S.on) if (o !== c) for (const ro of S.p[o]) {
+    if (ro < 0) { if (sq(o, 0) === at) n++; continue; }
+    if (ro > 50) continue;
+    const gap = (at - sq(o, ro) + 52) % 52;
+    if (gap >= 1 && gap <= 6 && ro + gap <= 50) n++;
+  }
+  return n;
+}
+function botPick(S, c, d) {
+  let best = null, bv = -1e9;
+  for (const i of legal(S, c, d)) {
+    const r0 = S.p[c][i], res = move(S, c, i, d), r = res.S.p[c][i];
+    let v = r / 10;
+    if (res.home) v += 100;
+    v += res.cap.length * 80;
+    if (r0 < 0) v += 60;
+    if (r > 50 && r0 <= 50) v += 30;
+    if (r <= 50 && SAFE.has(sq(c, r))) v += 25;
+    v += threat(S, c, r0) * 20 - threat(res.S, c, r) * 40;
+    if (v > bv) { bv = v; best = i; }
+  }
+  return best;
+}
+
+/* ---------- drawing ---------- */
+const cv = $('#board'), cx = cv.getContext('2d');
+let CELL = 36, boardImg = null;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function fit() {
+  const wide = innerWidth > 760;
+  const size = Math.min(wide ? innerWidth - 360 : innerWidth - 28, innerHeight - (wide ? 110 : 150), 640);
+  CELL = Math.max(20, Math.floor(size / 15));
+  const d = Math.min(2, devicePixelRatio || 1), px = CELL * 15;
+  cv.style.width = cv.style.height = px + 'px'; cv.width = cv.height = px * d; cx.setTransform(d, 0, 0, d, 0, 0);
+  boardImg = null;
+}
+addEventListener('resize', fit);
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { boardImg = null; });
+function star(c, x, y, r) {
+  c.beginPath();
+  for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r * 0.45 : r; c.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+  c.closePath(); c.fill();
+}
+function paintBoard() {
+  const s = CELL, px = s * 15, d = Math.min(2, devicePixelRatio || 1);
+  const off = document.createElement('canvas'); off.width = off.height = px * d;
+  const c = off.getContext('2d'); c.setTransform(d, 0, 0, d, 0, 0);
+  const surface = css('--surface') || '#fff', line = css('--line') || '#ccc', sunk = css('--sunk') || '#eee';
+  c.fillStyle = surface; c.fillRect(0, 0, px, px);
+  BASE.forEach(([bx, by], k) => {
+    c.fillStyle = COL[k].c; c.fillRect(bx * s, by * s, 6 * s, 6 * s);
+    c.fillStyle = surface; c.beginPath();
+    if (c.roundRect) c.roundRect((bx + 0.7) * s, (by + 0.7) * s, 4.6 * s, 4.6 * s, s * 0.5); else c.rect((bx + 0.7) * s, (by + 0.7) * s, 4.6 * s, 4.6 * s);
+    c.fill();
+    for (let i = 0; i < 4; i++) { const [x, y] = spot(k, i, -1); c.fillStyle = COL[k].l; c.beginPath(); c.arc(x * s, y * s, s * 0.55, 0, 7); c.fill(); }
+  });
+  c.strokeStyle = line; c.lineWidth = 1;
+  PATH.forEach(([x, y], k) => {
+    const st = START.indexOf(k);
+    c.fillStyle = st >= 0 ? COL[st].c : surface; c.fillRect(x * s, y * s, s, s); c.strokeRect(x * s + 0.5, y * s + 0.5, s - 1, s - 1);
+    if (SAFE.has(k)) { c.fillStyle = st >= 0 ? 'rgba(255,255,255,.85)' : sunk === surface ? '#bbb' : line; star(c, (x + 0.5) * s, (y + 0.5) * s, s * 0.32); }
+  });
+  LANE.forEach((lane, k) => lane.forEach(([x, y]) => { c.fillStyle = COL[k].c; c.fillRect(x * s, y * s, s, s); c.strokeRect(x * s + 0.5, y * s + 0.5, s - 1, s - 1); }));
+  const T = [[[6, 6], [6, 9]], [[6, 6], [9, 6]], [[9, 6], [9, 9]], [[6, 9], [9, 9]]];   // the centre: each colour's home triangle
+  T.forEach(([a, b], k) => { c.fillStyle = COL[k].c; c.beginPath(); c.moveTo(a[0] * s, a[1] * s); c.lineTo(b[0] * s, b[1] * s); c.lineTo(7.5 * s, 7.5 * s); c.closePath(); c.fill(); });
+  boardImg = off;
+}
+let anim = null;   // { c, i, rs: [r...], t0 }
+const STEP_MS = 90;
+function tokenSpots(S) {
+  const list = [];
+  if (!S) return list;
+  for (const c of S.on) for (let i = 0; i < 4; i++) {
+    let r = S.p[c][i];
+    if (i >= S.k) continue;
+    let pos = spot(c, i, r);
+    if (anim && anim.c === c && anim.i === i) {
+      const k = Math.min(anim.rs.length - 1, Math.floor((performance.now() - anim.t0) / STEP_MS));
+      pos = spot(c, i, anim.rs[k]);
+    }
+    list.push({ c, i, r, x: pos[0], y: pos[1] });
+  }
+  // tokens sharing a square spread a little
+  const groups = new Map();
+  for (const t of list) if (t.r >= 0 && t.r < END) { const k = t.x.toFixed(2) + ',' + t.y.toFixed(2); (groups.get(k) || groups.set(k, []).get(k)).push(t); }
+  for (const g of groups.values()) if (g.length > 1) g.forEach((t, j) => { const a = (j / g.length) * Math.PI * 2; t.x += Math.cos(a) * 0.2; t.y += Math.sin(a) * 0.2; t.small = true; });
+  for (const t of list) if (t.r === END) { const j = list.filter(o => o.c === t.c && o.r === END).indexOf(t); t.x += (j % 2 ? 0.18 : -0.18) * (t.c % 2 ? 1 : 0.6); t.y += (j < 2 ? -0.18 : 0.18); t.small = true; }
+  return list;
+}
+let picks = [];   // tokens the local player may move now
+function draw() {
+  requestAnimationFrame(draw);
+  if (!boardImg) paintBoard();
+  const s = CELL, px = s * 15;
+  cx.clearRect(0, 0, px, px); cx.drawImage(boardImg, 0, 0, px, px);
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+  for (const t of tokenSpots(G)) {
+    const r = s * (t.small ? 0.3 : 0.38), x = t.x * s, y = t.y * s;
+    if (picks.includes(t.i) && G && t.c === G.t && !anim) { cx.strokeStyle = COL[t.c].d; cx.lineWidth = 3; cx.globalAlpha = 0.4 + 0.6 * pulse; cx.beginPath(); cx.arc(x, y, r + 4 + pulse * 2, 0, 7); cx.stroke(); cx.globalAlpha = 1; }
+    cx.fillStyle = 'rgba(0,0,0,.22)'; cx.beginPath(); cx.ellipse(x, y + r * 0.55, r * 0.9, r * 0.45, 0, 0, 7); cx.fill();
+    cx.fillStyle = COL[t.c].d; cx.beginPath(); cx.arc(x, y, r, 0, 7); cx.fill();
+    cx.fillStyle = COL[t.c].c; cx.beginPath(); cx.arc(x, y - r * 0.12, r * 0.8, 0, 7); cx.fill();
+    cx.fillStyle = 'rgba(255,255,255,.75)'; cx.beginPath(); cx.arc(x - r * 0.25, y - r * 0.4, r * 0.22, 0, 7); cx.fill();
+  }
+}
+function dieSvg(n) {
+  const P = { 1: [[50, 50]], 2: [[28, 28], [72, 72]], 3: [[26, 26], [50, 50], [74, 74]], 4: [[28, 28], [72, 28], [28, 72], [72, 72]], 5: [[26, 26], [74, 26], [50, 50], [26, 74], [74, 74]], 6: [[28, 24], [72, 24], [28, 50], [72, 50], [28, 76], [72, 76]] }[n] || [];
+  const col = G ? COL[G.t].c : '#888';
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><rect x="4" y="4" width="92" height="92" rx="20" fill="#fff" stroke="${col}" stroke-width="6"/>${P.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="9" fill="#17202B"/>`).join('')}${n ? '' : '<text x="50" y="62" font-size="30" text-anchor="middle" font-family="Unbounded,sans-serif" font-weight="800" fill="' + col + '">ХАЯ</text>'}</svg>`;
+}
+
+/* ---------- one game, three ways to play: computer, one screen, online table ---------- */
+let G = null;            // the game state on screen
+let mode = 'bot';        // bot | local | net
+let seats = [];          // per colour: { u: uid | 'bot' | 'local', n }
+let table = null;        // online: { id, by, ... }
+let lastN = -1, logLines = [];
+const isMine = c => seats[c] && (mode !== 'net' ? seats[c].u === 'local' : seats[c].u === uid);
+function log(t) { logLines.unshift(t); logLines = logLines.slice(0, 30); const b = $('#log'); b.replaceChildren(...logLines.map(x => el('div', '', x))); }
+const who = c => (seats[c] && seats[c].n) || COL[c].n;
+function paintSide() {
+  const box = $('#players'); box.replaceChildren();
+  if (!G) return;
+  for (const c of G.on) {
+    const d = el('div', 'pl' + (c === G.t && G.w < 0 ? ' turn' : '')), dot = el('span', 'dot'); dot.style.background = COL[c].c;
+    const home = G.p[c].slice(0, G.k).filter(r => r === END).length;
+    d.append(dot, el('span', 'nm', who(c) + (isMine(c) && mode === 'net' ? ' (та)' : '')), el('span', 'hm', home + '/' + G.k + ' гэрт'));
+    box.append(d);
+  }
+  const die = $('#die'), me = isMine(G.t), canRoll = G.w < 0 && me && !G.d && !anim && !busy;
+  die.disabled = !canRoll; die.innerHTML = dieSvg(G.d);
+  picks = G.w < 0 && me && G.d && !busy ? legal(G, G.t, G.d) : [];
+  $('#hint').textContent = G.w >= 0 ? who(G.w) + ' яллаа!' : me ? (G.d ? (picks.length ? 'Хөдөлгөх бөмбөгөө товш' : 'Явах нүүдэл алга') : 'Шоогоо хая') : who(G.t) + '-ийн ээлж';
+  $('#sub').textContent = G.w >= 0 ? '' : me && !G.d ? (mode === 'net' ? 'Шоо дээр товш эсвэл Space' : 'Шоо дээр товш') : '';
+  $('#modeLbl').textContent = mode === 'net' ? 'Ширээ · ' + (CODE ? 'өрөө ' + CODE : 'нийтийн') : mode === 'local' ? 'Нэг дэлгэцээр' : 'Компьютертэй';
+}
+let busy = false;
+function show(S, why) {   // put a new state on screen, animating the token that moved
+  const prev = G;
+  if (prev && S && S.n === prev.n + 1 && why && why.c != null) {
+    const r0 = prev.p[why.c][why.i], r1 = S.p[why.c][why.i];
+    if (r1 > r0) {
+      const rs = []; for (let r = (r0 < 0 ? 0 : r0 + 1); r <= r1; r++) rs.push(r);
+      if (rs.length) {
+        const a = anim = { c: why.c, i: why.i, rs, t0: performance.now() };
+        setTimeout(() => { if (anim === a) { anim = null; paintSide(); } }, rs.length * STEP_MS + 40);   // timers, not frames: hidden tabs still move on
+      }
+    }
+  }
+  G = S; paintSide();
+}
+function describe(prev, S, d, c, i, cap, home) {
+  let t = who(c) + ': ' + d;
+  if (prev.p[c][i] < 0) t += ', бөмбөг гаргалаа';
+  if (cap.length) t += ', ' + cap.map(([o]) => who(o)).join(', ') + '-ийн бөмбөгийг цохилоо';
+  if (home) t += ', гэрт хүргэлээ';
+  return t;
+}
+async function roll() {
+  if (!G || G.w >= 0 || G.d || busy) return;
+  busy = true; sfx('roll');
+  const die = $('#die'); die.classList.remove('roll'); void die.offsetWidth; die.classList.add('roll');
+  await new Promise(r => setTimeout(r, 420));
+  const d = 1 + Math.floor(Math.random() * 6), S = clone(G), c = G.t;
+  S.d = d; S.s = d === 6 ? G.s + 1 : 0; S.n = G.n + 1;
+  if (d === 6) sfx('six');
+  busy = false;
+  await commit(S, null);
+  const still = () => G && G.n === S.n && G.w < 0;   // nobody moved meanwhile (online G is replaced by the snapshot copy)
+  if (S.s >= 3) { log(who(c) + ': 6 гурав дараалсан тул ээлж шилжлээ'); setTimeout(() => still() && commit(passTurn(G), null), 900); return; }
+  const opts = legal(S, c, d);
+  if (!opts.length) { log(who(c) + ': ' + d + ', явах нүүдэл алга'); setTimeout(() => still() && commit(passTurn(G), null), 900); return; }
+  const same = opts.every(i => S.p[c][i] < 0);   // every choice is a token leaving base: all alike
+  if (opts.length === 1 || same) setTimeout(() => still() && play(opts[0]), 450);
+}
+async function play(i) {
+  if (!G || !G.d || busy) return;
+  const c = G.t, d = G.d;
+  if (!legal(G, c, d).includes(i)) return;
+  const res = move(G, c, i, d), S = after(G, c, d, res);
+  log(describe(G, S, d, c, i, res.cap, res.home));
+  if (res.cap.length) sfx('cap'); else if (res.home) sfx('home'); else sfx('step');
+  await commit(S, { c, i });
+  if (S.w >= 0) gameOver();
+}
+// local games change G directly; online games write the table and everyone (this device too) takes it from the snapshot
+async function commit(S, why) {
+  if (mode !== 'net') { show(S, why); return; }
+  show(S, why);
+  lastSent = { n: S.n, why };
+  try { await D.set(TR('st'), enc(S, why)); } catch { flash('Нүүдэл бичигдсэнгүй, ширээний төлөвийг дахин авлаа.'); }
+}
+let lastSent = null;
+cv.addEventListener('click', e => {
+  if (!picks.length) return;
+  const b = cv.getBoundingClientRect(), x = (e.clientX - b.left) / CELL, y = (e.clientY - b.top) / CELL;
+  let best = null, bd = 0.8;
+  for (const t of tokenSpots(G)) if (t.c === G.t && picks.includes(t.i)) { const dd = Math.hypot(t.x - x, t.y - y); if (dd < bd) { bd = dd; best = t.i; } }
+  if (best != null) play(best);
+});
+$('#die').onclick = () => roll();
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space' && G && isMine(G.t) && !G.d) { e.preventDefault(); roll(); }
+  if (/^Digit[1-4]$/.test(e.code) && picks.length) { const i = +e.code.slice(5) - 1; if (picks.includes(i)) play(i); }
+});
+// the computer (and, online, the table host for players who are away) acts on its own
+let autoAt = 0;
+setInterval(() => {
+  if (!G || G.w >= 0 || busy || anim) return;
+  const c = G.t, actor = autoActor(c);
+  if (!actor) return;
+  if (performance.now() < autoAt) return;
+  autoAt = performance.now() + 700;
+  if (!G.d) { if (actor === 'bot' || actor === 'away') roll(); return; }
+  if (actor === 'bot' || actor === 'away') { const i = botPick(G, c, G.d); if (i != null) play(i); }
+}, 250);
+function autoActor(c) {
+  const s = seats[c];
+  if (mode !== 'net') return s && s.u === 'bot' ? 'bot' : null;
+  if (!table) return null;
+  // the table host runs the computer seats and stands in for players who are away; if the host is gone too
+  // (nothing happened for 45 s), the first other seated player takes over
+  const idle = G.at ? now() - G.at : 0;
+  const host = table.by === uid || (idle > 45000 && firstHuman(u => u !== table.by) === uid);
+  if (!host) return null;
+  if (!s) return 'away';                       // the seat was left during the game
+  if (s.u === 'bot') return 'bot';
+  if (s.u !== uid && idle > 30000) return 'away';
+  return null;
+}
+const firstHuman = ok => { for (const s of seats) if (s && s.u !== 'bot' && ok(s.u)) return s.u; return null; };
+let overKey = '';
+async function gameOver() {
+  const c = G.w, key = (table ? table.id : mode) + ':' + G.n;
+  if (overKey === key) return;
+  overKey = key; sfx('win');
+  const mine = isMine(c) && mode !== 'local';
+  const pts = mode === 'net' ? 3 : 1;
+  const nodes = [el('h2', '', who(c) + ' яллаа!'), el('div', 'big', '🏆')];
+  if (mode === 'local') nodes.push(el('p', '', 'Дөрвөн бөмбөгөө түрүүлж гэрт нь хүргэлээ.'));
+  else if (mine) nodes.push(el('p', '', net ? '+' + pts + ' оноо онооны самбарт нэмэгдлээ.' : 'Сайн байна!'));
+  const r = el('div', 'row');
+  if (mode === 'net') { if (table && table.by === uid) r.append(btn('Дахин тоглох', 'btn', restartTable)); r.append(btn('Ширээнүүд', 'btn ghost', lobby)); }
+  else r.append(btn('Дахин', 'btn', () => startLocal(mode, setup)), btn('Тохиргоо', 'btn ghost', lobby));
+  nodes.push(r);
+  showCard(...nodes);
+  if (mine && net) {
+    const done = LS.get('ludoWins', []);
+    if (done.includes(key)) return;
+    LS.set('ludoWins', done.concat(key).slice(-40));
+    try { await saveBoard('ludo', pts); } catch {}
+  }
+}
+
+// the score node the hub reads: running total of points plus today's and this week's, Ulaanbaatar time
+async function saveBoard(g, add) {
+  const ref = D.ref(rdb, 'scores/' + uid + '/' + g), o = (await D.get(ref)).val() || {};
+  const t = now(), dk = Math.floor((t + 288e5) / 864e5), wk = Math.floor((dk + 3) / 7);
+  const sum = (cur, same) => (same ? Number(cur) || 0 : 0) + add;
+  await D.set(ref, { best: (Number(o.best) || 0) + add, at: t, db: sum(o.db, o.dk === dk), dk, wb: sum(o.wb, o.wk === wk), wk });
+}
+
+/* ---------- overlay: menu, local setup ---------- */
+const ov = $('#ov'), card = $('#card');
+function showCard(...nodes) { card.replaceChildren(...nodes); ov.hidden = false; }
+function hideCard() { ov.hidden = true; }
+let setup = LS.get('ludoSetup', { n: 2, k: 4, local: 2 });
+function seg(list, val, set) {
+  const box = el('div', 'seg');
+  for (const [label, v] of list) { const b = btn(label, '', () => { set(v); lobby(); }); b.setAttribute('aria-pressed', String(v === val)); box.append(b); }
+  return box;
+}
+function nameRow() {
+  const r = el('div', 'row'), inp = el('input'); inp.placeholder = 'Нэрээ бичээрэй'; inp.maxLength = 24;
+  const ok = btn('Хадгалах', 'btn', () => { const n = inp.value.trim().slice(0, 24); if (!n) return; myName = n; LS.set('nick', n); if (net) D.set(D.ref(rdb, 'names/' + uid), n).catch(() => {}); lobby(); });
+  inp.onkeydown = e => { if (e.key === 'Enter') ok.click(); };
+  r.append(inp, ok); setTimeout(() => inp.focus(), 50); return r;
+}
+let tab = LS.get('ludoTab', CFG() ? 'net' : 'bot');
+function CFG() { return window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.databaseURL ? window.FIREBASE_CONFIG : null; }
+function lobby() {
+  const nodes = [el('h2', '', 'Лудо'), seg([['Онлайн', 'net'], ['Компьютертэй', 'bot'], ['Нэг дэлгэцээр', 'local']], tab, v => { tab = v; LS.set('ludoTab', v); })];
+  if (tab === 'net') return netLobby(nodes);
+  if (tab === 'bot') {
+    nodes.push(el('p', '', 'Та улаанаар, компьютер бусад өнгөөр тоглоно.'), el('div', 'sub', 'Компьютер'), seg([['1', 2], ['2', 3], ['3', 4]], setup.n, v => { setup.n = v; }));
+  } else {
+    nodes.push(el('p', '', 'Нэг утас, notebook-оо ээлжилж тоглоно.'), el('div', 'sub', 'Тоглогч'), seg([['2', 2], ['3', 3], ['4', 4]], setup.local, v => { setup.local = v; }));
+  }
+  nodes.push(el('div', 'sub', 'Бөмбөг'), seg([['2 (хурдан)', 2], ['4 (бүтэн)', 4]], setup.k, v => { setup.k = v; }));
+  LS.set('ludoSetup', setup);
+  const r = el('div', 'row'); r.append(btn('Эхлэх', 'btn', () => startLocal(tab, setup)));
+  if (G && G.w < 0 && mode !== 'net') r.append(btn('Үргэлжлүүлэх', 'btn ghost', hideCard));
+  nodes.push(r, rulesNote());
+  showCard(...nodes);
+}
+function rulesNote() { return el('p', 'note', '6 буувал бөмбөг гарна, дахин хаяна. Өрсөлдөгчийн бөмбөг дээр буувал түүнийг гэрт нь буцаана (★ ба гарааны нүдэнд цохиулахгүй). Гэрт яг таарах тоогоор орно. Дөрвөн бөмбөгөө түрүүлж оруулсан нь ялна.'); }
+function startLocal(kind, st) {
+  mode = kind; table = null;
+  const n = kind === 'bot' ? st.n : st.local, on = n === 2 ? [0, 2] : n === 3 ? [0, 1, 2] : [0, 1, 2, 3];
+  seats = [];
+  on.forEach((c, j) => { seats[c] = kind === 'bot' ? (j === 0 ? { u: 'local', n: myName || 'Та' } : { u: 'bot', n: 'Компьютер ' + j }) : { u: 'local', n: COL[c].n }; });
+  logLines = []; log('Шинэ тоглоом');
+  G = null; show(newGame(on, st.k)); hideCard();
+}
+$('#menuBtn').onclick = () => { if (mode === 'net' && table) netLobbyCard(); else lobby(); };
+
+/* ---------- Firebase: ludo/<M>/<tableId> = { by, at, k, seats/<colour> {u,n}, st } ---------- */
+const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
+let D = null, rdb = null, uid = 'local', net = false, offset = 0, tables = {};
+const now = () => Date.now() + offset;
+const R = p => D.ref(rdb, 'ludo/' + M + (p ? '/' + p : ''));
+const TR = p => R(table.id + (p ? '/' + p : ''));
+function enc(S) { return { t: S.t, d: S.d, s: S.s, w: S.w, n: S.n, on: S.on.join(''), p: S.p.map(a => a.join(',')).join(';'), at: now(), mv: lastSent && lastSent.why ? lastSent.why.c * 4 + lastSent.why.i : -1 }; }
+function dec(st, k, on) {
+  if (!st || typeof st.p !== 'string') return null;
+  const rows = st.p.split(';').map(r => r.split(',').map(Number));
+  if (rows.length !== 4 || rows.some(r => r.length !== 4 || r.some(v => !Number.isInteger(v) || v < -1 || v > END))) return null;
+  return { k, on, p: rows, t: st.t | 0, d: st.d | 0, s: st.s | 0, w: Number.isInteger(st.w) ? st.w : -1, n: st.n | 0, at: st.at || 0, mv: Number.isInteger(st.mv) ? st.mv : -1 };
+}
+function netLobby(nodes) {
+  if (!CFG()) { nodes.push(el('p', '', 'Онлайн ширээ зөвхөн линкээр нээдэг хувилбарт ажиллана.')); return showCard(...nodes); }
+  if (!net) { nodes.push(el('p', '', 'Сервертэй холбогдож байна…')); return showCard(...nodes); }
+  if (!myName) { nodes.push(el('p', '', 'Эхлээд нэрээ бичээрэй.'), nameRow()); return showCard(...nodes); }
+  nodes.push(el('p', '', (CODE ? 'Өрөө ' + CODE + '-ийн' : 'Нийтийн') + ' ширээнүүд. Ширээ бүрт 4 хүртэл хүн, хүн дутвал компьютер нэмж болно.'));
+  const list = el('div', 'tables'), ids = Object.keys(tables).filter(id => tables[id] && tables[id].by).sort((a, b) => (tables[b].at || 0) - (tables[a].at || 0));
+  for (const id of ids.slice(0, 12)) list.append(tableBox(id, tables[id]));
+  if (!ids.length) list.append(el('p', 'note', 'Одоогоор ширээ алга. Шинээр нээгээрэй.'));
+  const r = el('div', 'row');
+  r.append(btn('Ширээ нээх (4 бөмбөг)', 'btn', () => createTable(4)), btn('Хурдан (2 бөмбөг)', 'btn ghost', () => createTable(2)));
+  nodes.push(r, list, rulesNote());
+  showCard(...nodes);
+}
+function tableBox(id, t) {
+  const box = el('div', 'tbl'), started = !!(t.st && typeof t.st.p === 'string');
+  const names = [0, 1, 2, 3].map(c => t.seats && t.seats[c]);
+  const hd = el('div', 'hd'); hd.append(el('b', '', 'Ширээ · ' + (t.k === 2 ? '2 бөмбөг' : '4 бөмбөг')), el('span', '', started ? (t.st.w >= 0 ? 'Дууссан' : 'Тоглож байна') : 'Хүлээж байна'));
+  const grid = el('div', 'seats');
+  names.forEach((s, c) => {
+    const free = !s && !started, b = el(free ? 'button' : 'div', 'seat' + (s ? '' : ' free')), dot = el('span', 'dot'); dot.style.background = COL[c].c;
+    b.append(dot, el('span', '', s ? (s.u === uid ? 'Та' : s.n) : started ? '—' : 'Сул суудал'));
+    if (free) { b.type = 'button'; b.onclick = () => sit(id, c); }
+    grid.append(b);
+  });
+  const r = el('div', 'row'), mine = names.some(s => s && s.u === uid);
+  if (mine || started) r.append(btn(mine ? 'Орох' : 'Үзэх', 'btn sm', () => openTable(id)));
+  box.append(hd, grid); if (r.children.length) box.append(r);
+  return box;
+}
+async function createTable(k) {
+  const id = rid();
+  try {
+    await D.set(R(id), { by: uid, at: now(), k, seats: { 0: { u: uid, n: myName } } });
+    D.onDisconnect(R(id + '/seats/0')).remove().catch(() => {});
+    openTable(id);
+  } catch { flash('Ширээ нээж чадсангүй.'); }
+}
+async function sit(id, c) {
+  try {
+    await D.set(R(id + '/seats/' + c), { u: uid, n: myName });
+    D.onDisconnect(R(id + '/seats/' + c)).remove().catch(() => {});
+    openTable(id);
+  } catch { flash('Энэ суудал аль хэдийн эзэлсэн байна.'); }
+}
+function openTable(id) {
+  table = { id, by: tables[id] && tables[id].by };
+  mode = 'net'; G = null; lastN = -1; logLines = []; log('Ширээнд орлоо');
+  applyTable();
+}
+function applyTable() {
+  if (!table) return;
+  const t = tables[table.id];
+  if (!t) {
+    if (!table.seen) return;   // just created or joined: the snapshot is on its way
+    table = null; G = null; paintSide(); flash('Ширээ хаагдлаа.'); return lobby();
+  }
+  table.seen = true; table.by = t.by;
+  seats = [0, 1, 2, 3].map(c => (t.seats && t.seats[c] ? { u: String(t.seats[c].u), n: String(t.seats[c].n || COL[c].n).slice(0, 24) } : null));
+  const on = [0, 1, 2, 3].filter(c => seats[c]);
+  const S = dec(t.st, t.k === 2 ? 2 : 4, t.st && /^[0-3]{2,4}$/.test(String(t.st.on)) ? String(t.st.on).split('').map(Number) : on);
+  if (!S) { G = null; paintSide(); return netLobbyCard(); }
+  if (S.n !== lastN) {
+    const mv = S.mv >= 0 ? { c: Math.floor(S.mv / 4), i: S.mv % 4 } : null;
+    const prev = G;
+    if (prev && lastSent && lastSent.n === S.n) { /* our own move: already on screen */ G = S; paintSide(); }
+    else {
+      if (prev && S.n === prev.n + 1 && mv && S.p[mv.c][mv.i] !== prev.p[mv.c][mv.i]) {
+        const cap = []; for (const o of S.on) for (let j = 0; j < 4; j++) if (prev.p[o][j] >= 0 && S.p[o][j] === -1) cap.push([o, j]);
+        log(describe(prev, S, prev.d || '?', mv.c, mv.i, cap, S.p[mv.c][mv.i] === END));
+        sfx(cap.length ? 'cap' : 'step');
+      } else if (prev && S.d && S.d !== prev.d) sfx('roll');
+      show(S, mv);
+      if (S.t !== (prev && prev.t) && isMine(S.t) && S.w < 0) { sfx('turn'); flash('Таны ээлж!'); }
+    }
+    lastN = S.n;
+    hideCard();
+    if (S.w >= 0) gameOver();
+  }
+}
+function netLobbyCard() {
+  const t = table && tables[table.id];
+  if (!t) return lobby();
+  const nodes = [el('h2', '', 'Ширээ'), el('p', '', (t.k === 2 ? '2 бөмбөг' : '4 бөмбөг') + ' · ' + (CODE ? 'өрөө ' + CODE : 'нийтийн'))];
+  const grid = el('div', 'seats'), host = t.by === uid;
+  [0, 1, 2, 3].forEach(c => {
+    const s = t.seats && t.seats[c], d = el('div', 'seat' + (s ? '' : ' free')), dot = el('span', 'dot'); dot.style.background = COL[c].c;
+    d.append(dot, el('span', '', s ? (s.u === uid ? 'Та' : s.n) : 'Сул'));
+    if (!s && host) d.append(btn('+ Компьютер', 'btn ghost sm', () => D.set(R(table.id + '/seats/' + c), { u: 'bot', n: 'Компьютер' }).catch(() => {})));
+    if (s && s.u === 'bot' && host) d.append(btn('✕', 'btn ghost sm', () => D.remove(R(table.id + '/seats/' + c)).catch(() => {})));
+    if (!s && !host && !Object.values(t.seats || {}).some(x => x && x.u === uid)) d.append(btn('Суух', 'btn ghost sm', () => sit(table.id, c)));
+    grid.append(d);
+  });
+  const n = Object.values(t.seats || {}).filter(Boolean).length, r = el('div', 'row');
+  if (host) r.append(Object.assign(btn('Эхлүүлэх', 'btn', startTable), { disabled: n < 2 }), btn('Ширээ хаах', 'btn ghost', closeTable));
+  else r.append(el('p', 'note', 'Ширээ нээсэн хүн эхлүүлнэ.'), btn('Гарах', 'btn ghost', leaveTable));
+  r.append(btn('Ширээнүүд', 'btn ghost', () => { table = null; mode = 'net'; lobby(); }));
+  nodes.push(grid, r, el('p', 'note', 'Найзуудаа энэ ширээнд урих бол хуудасны линкийг явуулаарай. Ээлжээ 30 секунд хүлээлгэвэл ширээ нээсэн хүний төхөөрөмж тань өмнөөс нүүнэ.'));
+  showCard(...nodes);
+}
+async function startTable() {
+  const t = tables[table.id]; if (!t) return;
+  const on = [0, 1, 2, 3].filter(c => t.seats && t.seats[c]);
+  if (on.length < 2) return;
+  const S = newGame(on, t.k === 2 ? 2 : 4);
+  lastSent = null;
+  try { await D.set(R(table.id + '/st'), enc(S)); } catch { flash('Эхлүүлж чадсангүй.'); }
+}
+async function restartTable() { try { await D.remove(R(table.id + '/st')); lastN = -1; G = null; startTable(); } catch {} }
+async function closeTable() { try { await D.remove(R(table.id)); } catch {} table = null; G = null; mode = 'net'; lobby(); }
+async function leaveTable() {
+  const t = tables[table.id];
+  for (const c of [0, 1, 2, 3]) if (t && t.seats && t.seats[c] && t.seats[c].u === uid) await D.remove(R(table.id + '/seats/' + c)).catch(() => {});
+  table = null; G = null; lobby();
+}
+async function connect() {
+  const [A, U, Dm] = await Promise.all(['app', 'auth', 'database'].map(m => import(SDK + 'firebase-' + m + '.js')));
+  const app = A.initializeApp(CFG()), cred = await U.signInAnonymously(U.getAuth(app));
+  D = Dm; rdb = D.getDatabase(app); uid = cred.user.uid; net = true;
+  D.onValue(D.ref(rdb, '.info/serverTimeOffset'), s => { offset = Number(s.val()) || 0; }, () => {});
+  if (myName) D.set(D.ref(rdb, 'names/' + uid), myName).catch(() => {});
+  D.onValue(R(''), s => {
+    tables = s.val() || {};
+    // tidy: tables untouched for 6 hours may be removed by anyone
+    for (const [id, t] of Object.entries(tables)) if (t && t.at && now() - Math.max(t.at, (t.st && t.st.at) || 0) > 6 * 3600e3) D.remove(R(id)).catch(() => {});
+    if (table) { applyTable(); if (!G && tables[table.id]) netLobbyCard(); }
+    else if (mode === 'net' || tab === 'net') { if (!ov.hidden || !G) lobby(); }
+  }, () => flash('Ширээнүүдийг уншиж чадсангүй.'));
+  if (tab === 'net' && (!G || mode === 'net')) lobby();
+}
+
+/* ---------- start ---------- */
+fit(); requestAnimationFrame(draw);
+if (tab === 'net' && !CFG()) tab = 'bot';
+lobby();
+if (CFG()) connect().catch(() => flash('Сервертэй холбогдож чадсангүй.'));
+</script>
+</body>
+</html>

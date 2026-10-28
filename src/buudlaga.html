@@ -659,8 +659,18 @@ async function startRound() {
 }
 async function saveBest() {
   const mine = kills.get(uid) || 0;
-  if (!net || mine <= bestKills) return;
-  try { await D.update(D.ref(rdb, 'scores/' + uid), { fps: { best: mine, at: now() } }); bestKills = mine; } catch {}
+  if (!net || !mine) return;
+  try { await saveBoard('fps', mine); bestKills = Math.max(bestKills, mine); } catch {}
+}
+// the score node the hub reads: all-time best plus today's and this week's, Ulaanbaatar time
+async function saveBoard(g, v) {
+  const ref = D.ref(rdb, 'scores/' + uid + '/' + g), o = (await D.get(ref)).val() || {};
+  const t = now(), dk = Math.floor((t + 288e5) / 864e5), wk = Math.floor((dk + 3) / 7);
+  const pick = (cur, same) => (same && cur >= v ? cur : v);
+  const best = Math.max(Number(o.best) || 0, v);
+  const n = { best, at: best !== o.best ? t : o.at || t, db: pick(o.db, o.dk === dk), dk, wb: pick(o.wb, o.wk === wk), wk };
+  if (['best', 'db', 'dk', 'wb', 'wk'].every(k => n[k] === o[k])) return false;
+  await D.set(ref, n); return best !== o.best;
 }
 
 /* ---------- main loop ---------- */

@@ -13,13 +13,25 @@ const GAMES = {
   race:   { name: 'Карьерын зам', better: 'high', fmt: v => fmtInt(v) + ' м', hud: 'Зай' },
   puzzle: { name: 'Таавар 3×3', better: 'low', fmt: v => Number(v).toFixed(1) + ' сек', hud: 'Хугацаа' },
   quiz:   { name: 'Мэдлэгийн сорил', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: 'Оноо' },
-  chess:  { name: 'Шатар', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: 'Нүүдэл' },   // running total of wins vs the computer
+  chess:  { name: 'Шатар', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: 'Нүүдэл', sum: true },   // running total of wins vs the computer
   fps:    { name: 'Буудлага', better: 'high', fmt: v => fmtInt(v) + ' онолт', hud: '' },     // most hits-out in one match; the game itself is buudlaga.html
   cs2:    { name: 'CS2 академи', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: '' },  // best quiz score; the page is cs2.html
   blok:   { name: 'Блок тулаан', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: '' },  // best solo score; the page is blok.html
+  ludo:   { name: 'Лудо', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: '', sum: true },          // points for wins (online 3, vs computer 1); ludo.html
+  imp:    { name: 'Нууц хорлогч', better: 'high', fmt: v => fmtInt(v) + ' оноо', hud: '', sum: true },  // points for wins (crew 1, saboteur 3); horlogch.html
 };
-const WHERE = { hub: 'Нүүр', flappy: 'Болжмор', race: 'Карьерын зам', puzzle: 'Таавар', quiz: 'Сорил', live: 'Хамтдаа сорил', chess: 'Шатар', fps: 'Буудлага', cs2: 'CS2 академи', blok: 'Блок тулаан' };
-const PAGES = { fps: 'buudlaga.html', cs2: 'cs2.html', blok: 'blok.html' };   // games that are pages of their own on the link version
+const WHERE = { hub: 'Нүүр', flappy: 'Болжмор', race: 'Карьерын зам', puzzle: 'Таавар', quiz: 'Сорил', live: 'Хамтдаа сорил', chess: 'Шатар', fps: 'Буудлага', cs2: 'CS2 академи', blok: 'Блок тулаан', ludo: 'Лудо', imp: 'Нууц хорлогч' };
+const PAGES = { fps: 'buudlaga.html', cs2: 'cs2.html', blok: 'blok.html', ludo: 'ludo.html', imp: 'horlogch.html' };   // games that are pages of their own on the link version
+// Ulaanbaatar calendar days and Monday-to-Sunday weeks, for the board's «Өнөөдөр» and «Энэ 7 хоног»
+const UBMS = 8 * 3600e3;
+const dayKey = t => Math.floor((t + UBMS) / 86400000), weekKey = t => Math.floor((dayKey(t) + 3) / 7);
+// a game's score node: all-time best (or running total for sum games) plus today's (db/dk) and this week's (wb/wk)
+function scoreNode(g, o, v, add) {
+  o = o || {}; const t = Date.now(), dk = dayKey(t), wk = weekKey(t);
+  const pick = (cur, same) => (add != null ? (same ? Number(cur) || 0 : 0) + add : same && cur != null && !isBetter(g, v, cur) ? cur : v);
+  const best = add != null || o.best == null || isBetter(g, v, o.best) ? v : o.best;
+  return { best, at: best !== o.best ? t : o.at || t, db: pick(o.db, o.dk === dk), dk, wb: pick(o.wb, o.wk === wk), wk };
+}
 const isBetter = (g, a, b) => b == null || (GAMES[g].better === 'high' ? a > b : a < b);
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
 const dayOf = ms => { const d = new Date(ms); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
@@ -41,7 +53,7 @@ function sfx(kind) {
   } catch {}
 }
 const muteBtn = $('#mute');
-const paintMute = () => { muteBtn.textContent = muted ? 'Дуу: унтраалттай' : 'Дуу: асаалттай'; };
+const paintMute = () => { muteBtn.textContent = muted ? '🔇' : '🔊'; muteBtn.title = muted ? 'Дуу унтраалттай' : 'Дуу асаалттай'; muteBtn.setAttribute('aria-label', muteBtn.title); };
 muteBtn.onclick = () => { muted = !muted; LS.set('mute', muted); paintMute(); if (!muted) sfx('tick'); };
 paintMute();
 
@@ -56,7 +68,7 @@ let user = null, db = null, room = null;
 const me = { uid: null, name: '', avatar: '', color: '#888' };
 let canWrite = true, dbState = 'wait';     // wait | on | off
 let scores = new Map();                     // uid -> {flappy:{best,at}, ...}
-let tab = LS.get('tab', 'flappy'); if (!GAMES[tab]) tab = 'flappy';
+let tab = LS.get('tab', 'flappy'); if (!GAMES[tab] && tab !== 'team') tab = 'flappy';
 
 function localBest(g) { return LS.get('best', {})[g]; }
 function paintBests() {
@@ -71,7 +83,7 @@ function paintBests() {
 let wq = Promise.resolve();
 function queued(fn) { const p = wq.then(fn); wq = p.catch(() => {}); return p; }
 
-async function saveScore(g, v) {
+async function saveScore(g, v, add) {   // add: points just won, for games whose score is a running total
   const out = { localRecord: false, teamRecord: false, team: false, prev: null };
   const lb = LS.get('best', {}); out.prev = lb[g] ?? null;
   const mineTeam = me.uid ? scores.get(me.uid)?.[g]?.best : null;
@@ -79,14 +91,14 @@ async function saveScore(g, v) {
   if (isBetter(g, v, lb[g])) { lb[g] = v; LS.set('best', lb); }
   out.localRecord = isBetter(g, v, out.prev);
   if (db && me.uid && canWrite) {
-    const cur = scores.get(me.uid);
-    const prevTeam = cur?.[g]?.best;
-    if (isBetter(g, v, prevTeam)) {
+    const cur = scores.get(me.uid), old = cur?.[g];
+    const node = scoreNode(g, old, v, add);
+    if (!old || ['best', 'db', 'dk', 'wb', 'wk'].some(k => node[k] !== old[k])) {   // a new best today or this week counts too
       const body = cur ? JSON.parse(JSON.stringify(cur)) : {};
-      body[g] = { best: v, at: Date.now() };
+      body[g] = node;
       try {
         await queued(() => db.doc('scores/' + me.uid).set(body));
-        out.teamRecord = true; out.team = true;
+        out.teamRecord = isBetter(g, v, old?.best); out.team = true;
       } catch (e) {
         if (e && e.code === 'invalid_argument') { canWrite = false; renderBoard(); }
       }
@@ -94,6 +106,7 @@ async function saveScore(g, v) {
   }
   out.arena = await arenaSubmit(g, v);
   paintBests();
+  if (out.localRecord && out.prev != null && !GAMES[g].sum) confetti();
   return out;
 }
 
@@ -103,19 +116,92 @@ function rankOf(g, uid) {
   const i = list.findIndex(r => r.uid === uid);
   return i < 0 ? null : { pos: i + 1, of: list.length };
 }
-function boardList(g) {
+let per = LS.get('per', 'all'); if (!['day', 'week', 'all'].includes(per)) per = 'all';
+function periodVal(s, p) {
+  if (!s) return null;
+  if (p === 'day') return s.dk === dayKey(Date.now()) && typeof s.db === 'number' ? s.db : null;
+  if (p === 'week') return s.wk === weekKey(Date.now()) && typeof s.wb === 'number' ? s.wb : null;
+  return typeof s.best === 'number' ? s.best : null;
+}
+function boardList(g, p = 'all') {
   const list = [];
-  for (const [uid, d] of scores) { const s = d && d[g]; if (s && typeof s.best === 'number' && isFinite(s.best)) list.push({ uid, best: s.best, at: s.at || 0 }); }
+  for (const [uid, d] of scores) { const s = d && d[g], v = periodVal(s, p); if (v != null && isFinite(v)) list.push({ uid, best: v, at: s.at || 0 }); }
   list.sort((a, b) => GAMES[g].better === 'high' ? b.best - a.best || a.at - b.at : a.best - b.best || a.at - b.at);
   return list;
+}
+// the game of the day (not the running-total ones): its leader today wears the crown
+function dailyGame() {
+  const list = Object.keys(GAMES).filter(g => !GAMES[g].sum && !(inClaude && PAGES[g]));
+  return list[dayKey(Date.now()) % list.length];
+}
+const dailyChamp = () => { const top = boardList(dailyGame(), 'day')[0]; return top ? top.uid : null; };
+let dailyTok = 0;
+async function paintDaily() {
+  const tok = ++dailyTok, g = dailyGame(), champ = dailyChamp();
+  let nm = '';
+  if (champ) { try { const ps = user ? await user.profiles([champ]) : {}; nm = champ === me.uid ? 'Та' : (ps[champ] && ps[champ].name) || ''; } catch {} }
+  if (tok !== dailyTok) return;
+  for (const x of $$('.tile .daily')) x.remove();
+  const tile = $('.tile[data-open="' + g + '"]'); if (!tile) return;
+  const chip = el('span', 'daily', '👑 Өнөөдрийн тоглоом' + (nm ? ' · ' + nm : ''));
+  chip.title = champ ? 'Өнөөдрийн аварга: ' + (nm || 'хамт олны гишүүн') : 'Өнөөдөр хамгийн өндөр оноо авсан хүн титэм зүүнэ';
+  tile.append(chip);
+}
+/* small celebrations: confetti on your own record, a short note when someone else climbs into the top three */
+function confetti() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const c = $('#confetti'), x = c.getContext('2d'), d = Math.min(2, devicePixelRatio || 1);
+  c.width = innerWidth * d; c.height = innerHeight * d; c.hidden = false; x.setTransform(d, 0, 0, d, 0, 0);
+  const cols = ['#E8780A', '#F2BA30', '#3CC57A', '#2F6FE0', '#E55FA8', '#D03C3C'];
+  const bits = Array.from({ length: 140 }, () => ({ x: innerWidth / 2 + (Math.random() - 0.5) * 120, y: innerHeight * 0.35, vx: (Math.random() - 0.5) * 12, vy: -6 - Math.random() * 9, r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, w: 6 + Math.random() * 6, c: cols[Math.floor(Math.random() * cols.length)] }));
+  const t0 = performance.now();
+  const step = t => {
+    const k = (t - t0) / 1000; x.clearRect(0, 0, innerWidth, innerHeight);
+    for (const b of bits) { b.vy += 0.35; b.vx *= 0.99; b.x += b.vx; b.y += b.vy; b.r += b.vr; x.save(); x.translate(b.x, b.y); x.rotate(b.r); x.globalAlpha = Math.max(0, 1 - k / 2.6); x.fillStyle = b.c; x.fillRect(-b.w / 2, -3, b.w, 6); x.restore(); }
+    if (k < 2.6) requestAnimationFrame(step); else c.hidden = true;
+  };
+  requestAnimationFrame(step);
+}
+let annQ = [], annOn = false;
+function announce(text) {
+  annQ.push(text); if (annOn) return;
+  const next = () => { const t = annQ.shift(); const b = $('#ann'); if (!t) { annOn = false; b.hidden = true; return; } annOn = true; b.textContent = t; b.hidden = false; setTimeout(next, 4200); };
+  next();
+}
+let scoresReady = false;
+async function announceClimbs(prev, next) {
+  if (!scoresReady) return;
+  const t = Date.now();
+  for (const [id, d] of next) {
+    if (id === me.uid || !d) continue;
+    for (const g of Object.keys(GAMES)) {
+      const s = d[g], o = prev.get(id)?.[g];
+      if (!s || typeof s.best !== 'number' || (o && o.best === s.best) || t - (s.at || 0) > 5 * 60000) continue;
+      if (o && !isBetter(g, s.best, o.best) && !GAMES[g].sum) continue;
+      const list = boardList(g), pos = list.findIndex(r => r.uid === id) + 1;
+      if (!pos || pos > 3) continue;
+      let nm = 'Хамт олны гишүүн'; try { const ps = user ? await user.profiles([id]) : {}; nm = (ps[id] && ps[id].name) || nm; } catch {}
+      announce(nm + ' ' + GAMES[g].name + '-д ' + GAMES[g].fmt(s.best) + (GAMES[g].sum ? ' болж ' : ' аваад ') + pos + '-рт гарлаа ' + (pos === 1 ? '🎉' : '👏'));
+    }
+  }
 }
 
 let boardTok = 0;
 async function renderBoard() {
   const tok = ++boardTok;
-  for (const b of $$('#tabs button')) b.setAttribute('aria-pressed', String(b.dataset.tab === tab));
-  const rows = $('#rows'), empty = $('#boardEmpty'), note = $('#boardNote');
-  const list = dbState === 'off' ? localRows(tab) : boardList(tab).slice(0, 10);
+  for (const b of $$('#tabs button')) {
+    const on = b.dataset.tab === tab; b.setAttribute('aria-pressed', String(on));
+    if (on && b.offsetParent) {   // keep the chosen game's tab in sight in the scrolling row
+      const box = $('#tabs'), br = box.getBoundingClientRect(), r = b.getBoundingClientRect();
+      if (br.width && (r.left < br.left || r.right > br.right)) box.scrollBy({ left: r.left - br.left - 8, behavior: 'smooth' });
+    }
+  }
+  for (const b of $$('#per button')) b.setAttribute('aria-pressed', String(b.dataset.per === per));
+  $('#per').hidden = dbState === 'off';
+  if (tab === 'team') { paintDaily(); return renderTeams(tok); }
+  const rows = $('#rows'), empty = $('#boardEmpty'), note = $('#boardNote'), cta = $('#boardCta');
+  const list = dbState === 'off' ? localRows(tab) : boardList(tab, per).slice(0, 10);
+  const champ = tab === dailyGame() && dbState !== 'off' ? dailyChamp() : null;
   let ps = {};
   if (user && list.length) ps = await user.profiles(list.map(r => r.uid));
   if (tok !== boardTok) return;
@@ -123,28 +209,117 @@ async function renderBoard() {
   const td = today();
   list.forEach((r, i) => {
     const li = el('li'); if (r.uid === me.uid || r.local) li.classList.add('me');
-    li.append(el('span', 'rk', String(i + 1)));
+    li.append(el('span', 'rk' + (i < 3 && !r.local ? ' medal' : ''), i < 3 && !r.local ? ['🥇', '🥈', '🥉'][i] : String(i + 1)));
     const p = r.local ? null : ps[r.uid];
     const who = r.local ? myName() || 'Та' : (p && p.name) || (r.uid === me.uid ? (me.name || 'Та') : 'Хамт олны гишүүн');
     li.append(face(r.uid, who, p && p.avatarUrl));
     if (!r.local) { li.dataset.uid = r.uid; li.onclick = () => showProfile(r.uid); }
-    const nm = el('span', 'nm', r.local ? 'Та (энэ төхөөрөмж)' : who);
-    if (r.at && dayOf(r.at) === td) nm.append(el('small', '', 'өнөөдөр'));
+    const nm = el('span', 'nm', (r.local ? 'Та (энэ төхөөрөмж)' : who) + (r.uid === champ ? ' 👑' : ''));
+    if (r.uid === champ) nm.title = 'Өнөөдрийн тоглоомын аварга';
+    if (per === 'all' && r.at && dayOf(r.at) === td) nm.append(el('small', '', 'өнөөдөр'));
     li.append(nm);
     li.append(el('span', 'sc num', GAMES[tab].fmt(r.best)));
     rows.append(li);
   });
   empty.hidden = list.length > 0;
-  empty.textContent = dbState === 'off' ? 'Одоогоор амжилт алга. Тоглоод эхний оноогоо аваарай.' : 'Одоогоор оноо алга. Эхлээд тоглоод самбарт гараарай.';
+  empty.textContent = dbState === 'off' ? 'Одоогоор амжилт алга. Тоглоод эхний оноогоо аваарай.'
+    : per === 'day' ? 'Өнөөдөр хараахан хэн ч тоглоогүй байна.' : per === 'week' ? 'Энэ долоо хоногт хараахан оноо алга.' : 'Одоогоор оноо алга. Эхлээд тоглоод самбарт гараарай.';
+  // an empty or one-person board invites the others
+  cta.hidden = dbState === 'off' || list.length > 1;
+  if (!cta.hidden) {
+    cta.replaceChildren(el('b', '', list.length ? 'Ганцаараа тэргүүлж байна!' : 'Түрүүлж самбарт гараарай!'), el('span', '', 'Найзаа урьж, рекордыг нь эвд!'));
+    if (!inClaude && (navigator.share || navigator.clipboard)) cta.append(chBtn('🔗 Линк хуваалцах', 'btn ghost', shareLink));
+  }
   if (dbState === 'wait') note.textContent = 'Багийн самбар холбогдож байна…';
   else if (dbState === 'off' && !online) note.textContent = 'Нийтийн онооны самбар, «Хамтдаа сорил», өрөө зөвхөн онлайн хувилбарт ажиллана. Энд таны амжилт энэ төхөөрөмжид хадгалагдана.';
   else if (dbState === 'off') note.textContent = 'Багийн самбар холбогдсонгүй (' + RECONNECT + '). Оноо тань энэ төхөөрөмжид хадгалагдана.';
   else if (!canWrite) note.textContent = 'Таны эрх зөвхөн үзэх тул оноо тань энэ төхөөрөмжид л хадгалагдана. Самбарт гарахын тулд эзэмшигчээс Contributor эрх аваарай.';
-  else note.textContent = tab === 'chess'
+  else note.textContent = (tab === 'chess'
     ? 'Шатрын оноо нь компьютерийг ялж цуглуулсан нийлбэр: Амархан 1, Дунд 3, Хүнд 5.'
-    : 'Хүн бүрийн хамгийн сайн амжилт харагдана. Самбар шууд шинэчлэгддэг.';
+    : tab === 'ludo' ? 'Лудогийн оноо: онлайнаар ялбал 3, компьютерийг ялбал 1.'
+    : tab === 'imp' ? 'Нууц хорлогчийн оноо: ажилтнаар ялбал 1, хорлогчоор ялбал 3.'
+    : per === 'all' ? 'Хүн бүрийн хамгийн сайн амжилт харагдана. Самбар шууд шинэчлэгддэг.'
+    : (per === 'day' ? 'Өнөөдрийн' : 'Энэ долоо хоногийн (даваа–ням)') + (GAMES[tab].sum ? ' цуглуулсан оноо.' : ' хамгийн сайн амжилт.'))
+    + (tab === dailyGame() ? ' 👑 Өнөөдрийн тоглоом: өнөөдөр тэргүүлж буй хүн титэм зүүнэ.' : '');
+  paintDaily();
+}
+/* team board: in each game the top 10 (of the chosen period) earn 10, 9 … 1 points; a team's score is the sum over its members */
+const MEDALS = ['🥇', '🥈', '🥉'];
+function rankPoints(p) {
+  const pts = new Map();
+  for (const g of pfGames()) boardList(g, p).slice(0, 10).forEach((r, i) => pts.set(r.uid, (pts.get(r.uid) || 0) + 10 - i));
+  return pts;
+}
+async function renderTeams(tok) {
+  const rows = $('#rows'), empty = $('#boardEmpty'), note = $('#boardNote'), cta = $('#boardCta');
+  const pts = rankPoints(per), mine = (myProf().tm || '').toLocaleLowerCase();
+  const list = teamList().map(t => ({ ...t, pts: t.members.reduce((a, u) => a + (pts.get(u) || 0), 0) }))
+    .sort((a, b) => b.pts - a.pts || b.members.length - a.members.length).slice(0, 10);
+  const ids = [...new Set(list.flatMap(t => t.members.slice(0, 3)))];
+  let ps = {}; if (user && ids.length) ps = await user.profiles(ids);
+  if (tok !== boardTok) return;
+  rows.replaceChildren();
+  list.forEach((t, i) => {
+    const li = el('li', 'team' + (t.k === mine ? ' me' : ''));
+    li.append(el('span', 'rk' + (i < 3 ? ' medal' : ''), i < 3 ? MEDALS[i] : String(i + 1)));
+    const fc = el('span', 'tface');
+    for (const u of t.members.slice(0, 3)) fc.append(face(u, (ps[u] && ps[u].name) || (u === me.uid ? me.name || myName() : '?'), ps[u] && ps[u].avatarUrl));
+    const nm = el('span', 'nm', t.name); nm.append(el('span', 'cnt', t.members.length + ' гишүүн'));
+    li.append(fc, nm, el('span', 'sc num', fmtInt(t.pts) + ' оноо'));
+    li.onclick = () => showTeam(t, pts);
+    rows.append(li);
+  });
+  empty.hidden = list.length > 0;
+  empty.textContent = dbState === 'off' ? 'Баг зөвхөн онлайн хувилбарт ажиллана.' : 'Одоогоор баг алга.';
+  cta.hidden = dbState === 'off' || list.length > 1;
+  if (!cta.hidden) {
+    cta.replaceChildren(el('b', '', list.length ? 'Ганц баг байна!' : 'Багаа үүсгээрэй!'), el('span', '', 'Профайлдаа багийнхаа нэрийг бичээд хамт олноороо өрсөлдөөрэй.'));
+    if (online) cta.append(chBtn('Профайлд баг бичих', 'btn ghost', () => askName(false)));
+  }
+  note.textContent = 'Тоглоом бүрийн шилдэг 10-т орсон хүн 10, 9 … 1 оноо авна. Багийн оноо нь гишүүдийн онооны нийлбэр.'
+    + (per === 'day' ? ' Өнөөдрийн самбараар тоолж байна.' : per === 'week' ? ' Энэ долоо хоногийн самбараар тоолж байна.' : '');
+}
+async function showTeam(t, pts) {
+  sfx('tick');
+  let ps = {}; try { if (user) ps = await user.profiles(t.members); } catch {}
+  const body = $('#pfBody'), sum = t.members.reduce((a, u) => a + (pts.get(u) || 0), 0);
+  body.replaceChildren(el('h3', '', '👥 ' + t.name), el('p', '', t.members.length + ' гишүүн · ' + fmtInt(sum) + ' оноо'));
+  const box = el('div', 'tmembers');
+  for (const u of t.members.slice().sort((a, b) => (pts.get(b) || 0) - (pts.get(a) || 0))) {
+    const nm = u === me.uid ? me.name || myName() || 'Та' : (ps[u] && ps[u].name) || 'Хамт олны гишүүн', d = el('div');
+    d.append(face(u, nm, ps[u] && ps[u].avatarUrl), el('span', '', nm), el('b', 'num', fmtInt(pts.get(u) || 0)));
+    box.append(d);
+  }
+  body.append(box, chBtns(chBtn('Хаах', 'btn ghost', () => { $('#pfView').hidden = true; })));
+  $('#pfView').hidden = false;
 }
 $('#tabs').onclick = e => { const b = e.target.closest('button[data-tab]'); if (!b) return; tab = b.dataset.tab; LS.set('tab', tab); renderBoard(); };
+$('#per').onclick = e => { const b = e.target.closest('button[data-per]'); if (!b) return; per = b.dataset.per; LS.set('per', per); renderBoard(); };
+/* tea-time call: opening an open room tells everyone on the hub, roomcall/<id> {by, code, at}; old calls are tidied by anyone */
+const callSeen = new Set(LS.get('callSeen', []));
+function callsStart() {
+  db.collection('roomcall').onSnapshot(async snap => {
+    const t = Date.now();
+    for (const x of snap.docs) {
+      const c = x.data();
+      if (!c || typeof c.code !== 'string' || !/^[A-Z0-9]{4,6}$/.test(c.code)) continue;
+      if (t - (c.at || 0) > 30 * 60000) { db.doc('roomcall/' + x.id).delete().catch(() => {}); continue; }
+      if (c.by === me.uid || callSeen.has(x.id) || t - (c.at || 0) > 3 * 60000 || arenaCode === c.code) continue;
+      callSeen.add(x.id); LS.set('callSeen', [...callSeen].slice(-30));
+      let nm = 'Хамт олны гишүүн'; try { const ps = user ? await user.profiles([c.by]) : {}; nm = (ps[c.by] && ps[c.by].name) || nm; } catch {}
+      sfx('good');
+      toastNote = { text: '☕ ' + nm + ' өрөө нээлээ, орох уу?', act: ['Орох', () => { toastNote = null; toastRender(); arenaEnter(c.code); scrollTo({ top: 0, behavior: 'smooth' }); }] };
+      toastRender();
+    }
+  }, () => {});
+}
+async function shareLink() {
+  const url = location.href.split('#')[0];
+  try {
+    if (navigator.share) await navigator.share({ title: 'Цайны цаг', text: 'Миний рекордыг эвдэж чадах уу?', url });
+    else { await navigator.clipboard.writeText(url); announce('Линк хуулагдлаа. Найздаа явуулаарай!'); }
+  } catch {}
+}
 
 /* lobby presence: who is online and where */
 let where = 'hub';
@@ -161,6 +336,9 @@ async function renderOnline() {
   const people = new Map();
   for (const p of room.peers()) { if (p.kind !== 'viewer') continue; const k = p.by || p.peer; if (!people.has(k) || !p.isMe) people.set(k, p); }
   const arr = [...people.values()];
+  // the LIVE badge on «Хамтдаа сорил» only while somebody is actually in it
+  const liveN = arr.filter(p => p.presence && p.presence.where === 'live').length;
+  $('#liveBadge').hidden = !liveN; $('#liveN').textContent = liveN === 1 ? '1 хүн тоглож байна' : liveN + ' хүн тоглож байна';
   const ids = arr.map(p => p.by).filter(Boolean);
   let ps = {}; if (user && ids.length) ps = await user.profiles(ids);
   if (tok !== onlineTok) return;
@@ -286,10 +464,22 @@ const PF_TIME = ['Өглөө', 'Өдрийн цайны цаг', 'Орой', 'Ш
 const PIC_RE = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]{100,24000}$/;
 const pfInt = (v, hi) => (Number.isInteger(v) && v >= -1 && v <= hi ? v : -1);
 const pfGames = () => Object.keys(GAMES).filter(g => !(inClaude && PAGES[g]));
+const teamName = v => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, 20) : '');   // people who write the same name (any case) are one team
 function profClean(x) {
   x = x || {};
   return { e: pfInt(x.e, PF_EMO.length - 1), c: pfInt(x.c, PF_COL.length - 1), g: typeof x.g === 'string' && GAMES[x.g] ? x.g : '',
-    s: pfInt(x.s, PF_STAT.length - 1), w: pfInt(x.w, PF_TIME.length - 1), p: Number.isFinite(x.p) && x.p > 0 ? x.p : 0 };
+    s: pfInt(x.s, PF_STAT.length - 1), w: pfInt(x.w, PF_TIME.length - 1), p: Number.isFinite(x.p) && x.p > 0 ? x.p : 0, tm: teamName(x.tm) };
+}
+function teamList() {   // teams as people wrote them: the most used spelling names the team
+  const teams = new Map(), all = new Map(profs);
+  if (me.uid) all.set(me.uid, myProf());   // my own edit shows at once, before the server has it
+  for (const [uid, pr] of all) {
+    const tm = pr.tm; if (!tm) continue;
+    const k = tm.toLocaleLowerCase(), t = teams.get(k) || teams.set(k, { k, spell: new Map(), members: [] }).get(k);
+    t.members.push(uid); t.spell.set(tm, (t.spell.get(tm) || 0) + 1);
+  }
+  for (const t of teams.values()) t.name = [...t.spell.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  return [...teams.values()];
 }
 let profs = new Map();          // uid -> clean prof
 const pics = new Map();         // uid -> { p, url }
@@ -375,6 +565,7 @@ async function showProfile(uid) {
   if (PF_STAT[pr.s]) body.append(el('p', 'pfstat', PF_STAT[pr.s]));
   const dl = el('dl', 'pffacts');
   const fact = (k, v) => dl.append(el('dt', '', k), el('dd', '', v));
+  if (pr.tm) fact('Баг', pr.tm);
   if (GAMES[pr.g]) fact('Дуртай тоглоом', GAMES[pr.g].name);
   if (PF_TIME[pr.w]) fact('Тоглодог цаг', PF_TIME[pr.w]);
   const sc = scores.get(uid) || {};
@@ -430,7 +621,18 @@ function askName(first) {
       opts($('#pfGame'), pfGames(), 'g', g => GAMES[g].name);
       opts($('#pfStat'), PF_STAT, 's');
       opts($('#pfTime'), PF_TIME, 'w');
+      // existing teams as one-tap choices, so the same team is spelt the same way
+      const tbox = $('#pfTeams'), mine = teamName($('#pfTeam').value).toLocaleLowerCase();
+      tbox.replaceChildren();
+      for (const t of teamList().sort((a, b) => b.members.length - a.members.length).slice(0, 8)) {
+        const b = el('button', '', t.name + ' · ' + t.members.length); b.type = 'button';
+        b.setAttribute('aria-pressed', String(t.k === mine));
+        b.onclick = () => { $('#pfTeam').value = t.k === mine ? '' : t.name; paint(); };
+        tbox.append(b);
+      }
     };
+    $('#pfTeam').value = cur.tm || '';
+    $('#pfTeam').oninput = () => paint();
     paint(); dlg.hidden = false;
     if (FB) setTimeout(() => inp.focus(), 50);
     inp.oninput = () => paint();
@@ -446,6 +648,7 @@ function askName(first) {
       const n = inp.value.trim().replace(/\s+/g, ' ').slice(0, 24);
       if (FB && !n) { err.textContent = 'Нэрээ бичээрэй.'; inp.focus(); return; }
       if (inClaude && !canWrite) { err.textContent = 'Таны эрх зөвхөн үзэх тул профайл хадгалагдахгүй. Эзэмшигчээс Contributor эрх аваарай.'; return; }
+      cur.tm = teamName($('#pfTeam').value);
       LS.set('prof', profClean(cur)); LS.set('profDirty', true);
       if (pic !== undefined) LS.set('pic', pic);
       if (FB) {
@@ -463,7 +666,7 @@ function askName(first) {
 $('#nameBtn').onclick = () => { sfx('tick'); askName(false); };
 
 async function boot() {
-  if (inClaude) for (const x of $$('[data-open="fps"], #tabs [data-tab="fps"], [data-open="cs2"], #tabs [data-tab="cs2"], [data-open="blok"], #tabs [data-tab="blok"]')) x.style.display = 'none';   // these pages live on the link version only
+  if (inClaude) for (const g of Object.keys(PAGES)) for (const x of $$('[data-open="' + g + '"], #tabs [data-tab="' + g + '"]')) x.style.display = 'none';   // these pages live on the link version only
   renderBoard(); paintBests(); renderOnline(); arenaRender();
   if (!online) { dbState = 'off'; $('#liveFoot').textContent = 'Зөвхөн онлайн хувилбарт ажиллана'; renderBoard(); autoStart(); return; }
   if (FB && !myName()) await askName(true);
@@ -483,13 +686,15 @@ async function boot() {
     if (!d) { dbState = 'off'; renderBoard(); chRefresh(); arenaRender(); notesRender(); adsRender(); return; }
     dbState = 'on';
     if (!chessv.hidden && chCfg.mode === 'tour') chTourList();
-    chRefresh(); invListen(); notesStart(); adsStart(); profStart();
+    chRefresh(); invListen(); notesStart(); adsStart(); profStart(); callsStart();
     const code = (location.hash.match(/(?:^#|&)r=([A-Za-z0-9]{4,6})/) || [])[1] || LS.get('arena', '');
     if (code) arenaEnter(code); else arenaRender();
     const tcode = (location.hash.match(/(?:^#|&)t=([A-Za-z0-9]{4,6})/) || [])[1];   // link to a coded tournament
     if (tcode) { chCfg.mode = 'tour'; openAny('chess'); chSetup(); tourJoinCode(tcode); }
     d.collection('scores').onSnapshot(snap => {
+      const prev = scores;
       scores = new Map(snap.docs.map(x => [x.id, x.data()]));
+      announceClimbs(prev, scores); scoresReady = true;
       renderBoard(); paintBests();
     }, () => { dbState = 'off'; renderBoard(); });
     renderBoard();
@@ -622,6 +827,7 @@ async function arenaCreate() {
   try {
     await db.doc(base + code).set(body);
     arenaMaking = false; sfx('good'); arenaEnter(code);
+    if (open) db.doc('roomcall/' + rid()).set({ by: me.uid, code, at: Date.now() }).catch(() => {});   // tea-time call to everyone on the hub
   } catch (e) {
     arenaErr = 'Өрөө нээж чадсангүй' + (e && e.code === 'invalid_argument' ? ': Contributor эрх хэрэгтэй.' : '. Дахин оролдоно уу.'); arenaRender();
   }
@@ -741,7 +947,7 @@ function arenaRender() {
         box.append(chBtns(chBtn(ended ? 'Шинэ тойрог эхлүүлэх' : 'Тэмцээн эхлүүлэх', 'btn', arenaStart)));
       }
       // every game from inside the room: the together games open the room's own match, the others count for a running contest in them
-      const all = [['live', 'Хамтдаа сорил'], ['chess', 'Шатар'], ['fps', 'Буудлага'], ['blok', 'Блок тулаан'], ['flappy', 'Болжмор'], ['race', 'Карьерын зам'], ['puzzle', 'Таавар 3×3'], ['quiz', 'Мэдлэгийн сорил'], ['cs2', 'CS2 академи']]
+      const all = [['live', 'Хамтдаа сорил'], ['chess', 'Шатар'], ['fps', 'Буудлага'], ['blok', 'Блок тулаан'], ['ludo', 'Лудо'], ['imp', 'Нууц хорлогч'], ['flappy', 'Болжмор'], ['race', 'Карьерын зам'], ['puzzle', 'Таавар 3×3'], ['quiz', 'Мэдлэгийн сорил'], ['cs2', 'CS2 академи']]
         .filter(([k]) => !(inClaude && PAGES[k]));
       const row = chBtns(...all.map(([k, label]) => {
         const b = chBtn(label, running && k === g ? 'btn' : 'btn ghost', () => openAny(k));
@@ -749,7 +955,7 @@ function arenaRender() {
         return b;
       }));
       box.append(el('span', 'seglbl', 'Өрөөнийхөнтэйгээ тоглох'), row,
-        el('p', 'note', 'Хамтдаа сорил, Шатар, Буудлага, Блокийн тулаан нь зөвхөн энэ өрөөний хүмүүстэй тоглогдоно. Бусад тоглоомд тэмцээн явагдаж байвал оноо тань өрөөний жагсаалтад орно.'));
+        el('p', 'note', 'Хамтдаа сорил, Шатар, Буудлага, Блокийн тулаан, Лудо, Нууц хорлогч нь зөвхөн энэ өрөөний хүмүүстэй тоглогдоно. Бусад тоглоомд тэмцээн явагдаж байвал оноо тань өрөөний жагсаалтад орно.'));
     }
   }
   if (arenaErr) box.append(el('p', 'note bad', arenaErr));
@@ -2293,7 +2499,7 @@ async function chFinish() {
   if (!pts) { P.textContent = o.win ? 'Дахиад оролдоорой!' : ''; return; }
   P.textContent = 'Хадгалж байна…';
   const prev = Math.max(localBest('chess') || 0, (me.uid && scores.get(me.uid)?.chess?.best) || 0);
-  const r = await saveScore('chess', prev + pts);
+  const r = await saveScore('chess', prev + pts, pts);
   if (chs !== g) return;
   const rk = r.team ? rankOf('chess', me.uid) : null;
   P.textContent = '+' + pts + ' оноо, нийт ' + fmtInt(prev + pts) + '. ' + (rk ? 'Багийн самбарт ' + rk.pos + '-р байр.' : r.team ? 'Багийн самбарт хадгалагдлаа.' : 'Энэ төхөөрөмжид хадгалагдлаа.');

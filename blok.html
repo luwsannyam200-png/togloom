@@ -380,8 +380,8 @@ requestAnimationFrame(frame);
 const ov = $('#ov'), card = $('#card');
 function hideOv() { ov.hidden = true; }
 function showCard(...nodes) { card.replaceChildren(...nodes); ov.hidden = false; }
-let mode = LS.get('blokMode', 'solo') === 'battle' ? 'battle' : 'solo';
-$('#modes').onclick = e => { const b = e.target.closest('[data-mode]'); if (!b || (!G.over && G.mode === mode)) { if (b && !G.over) flash('Эхлээд энэ тоглолтоо дуусгаарай.'); return; } mode = b.dataset.mode; LS.set('blokMode', mode); paintModes(); lobby(); };
+let mode = CODE || LS.get('blokMode', 'solo') === 'battle' ? 'battle' : 'solo';   // from a room: straight to the battle
+$('#modes').onclick = e => { const b = e.target.closest('[data-mode]'); if (!b || (!G.over && G.mode === mode)) { if (b && !G.over) flash('Эхлээд энэ тоглолтоо дуусгаарай.'); return; } mode = b.dataset.mode; LS.set('blokMode', mode); paintModes(); lobby(); joinRound(); };
 function paintModes() { for (const b of document.querySelectorAll('#modes button')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode)); $('#oppPanel').hidden = mode !== 'battle'; }
 let flashT = 0;
 function flash(t) { $('#msg').textContent = t; clearTimeout(flashT); flashT = setTimeout(() => { $('#msg').textContent = ''; }, 2500); }
@@ -425,8 +425,7 @@ async function endSolo() {
   card.lastChild.append(btn('Дахин', 'btn', () => startGame('solo')), btn('← Цэс', 'btn ghost', () => { location.href = $('.back').href; }));
   if (!net) return;
   try {
-    const cur = Number((await D.get(D.ref(rdb, 'scores/' + uid + '/blok/best'))).val()) || 0;
-    if (v > cur) { await D.update(D.ref(rdb, 'scores/' + uid), { blok: { best: v, at: now() } }); saved.textContent = 'Шинэ дээд амжилт! Онооны самбарт хадгалагдлаа.'; }
+    if (await saveBoard('blok', v)) saved.textContent = 'Шинэ дээд амжилт! Онооны самбарт хадгалагдлаа.';
     if (await roomSubmit(v)) saved.textContent += ' Өрөөний тэмцээнд бүртгэгдлээ.';
   } catch {}
 }
@@ -437,6 +436,16 @@ const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
 let D = null, rdb = null, uid = 'local', net = false, offset = 0;
 const now = () => Date.now() + offset;
 const R = p => D.ref(rdb, 'blok/' + M + (p ? '/' + p : ''));
+// the score node the hub reads: all-time best (or running total when add is given) plus today's and this week's, Ulaanbaatar time
+async function saveBoard(g, v, add) {
+  const ref = D.ref(rdb, 'scores/' + uid + '/' + g), o = (await D.get(ref)).val() || {};
+  const t = now(), dk = Math.floor((t + 288e5) / 864e5), wk = Math.floor((dk + 3) / 7);
+  const pick = (cur, same) => (add != null ? (same ? Number(cur) || 0 : 0) + add : same && cur >= v ? cur : v);
+  const best = add != null ? (Number(o.best) || 0) + add : Math.max(Number(o.best) || 0, v);
+  const n = { best, at: best !== o.best ? t : o.at || t, db: pick(o.db, o.dk === dk), dk, wb: pick(o.wb, o.wk === wk), wk };
+  if (['best', 'db', 'dk', 'wb', 'wk'].every(k => n[k] === o[k])) return false;
+  await D.set(ref, n); return best !== o.best;   // true = a new all-time best
+}
 let room = null, roomBase = '';
 const contest = () => room && room.game === 'blok' && room.round && now() < room.ends;
 async function roomSubmit(v) {
@@ -469,7 +478,9 @@ function publish(force) {
   D.set(R('p/' + uid), { n: myName || 'Тоглогч', b, sc: Math.min(1e7, G.score), out: G.over, pl: myPlace, r: G.round || meta.round, at: now() }).catch(() => {});
 }
 function inRound(p) { return meta && p.r === meta.round; }
-const alive = () => [...players.values()].filter(p => inRound(p) && !p.out);
+const fresh = p => now() - (p.at || 0) < 45000;   // a closed or hidden page stops writing its board: it no longer counts as playing
+const alive = () => [...players.values()].filter(p => inRound(p) && !p.out && fresh(p));
+const roundLive = () => !!meta && (meta.start > now() || alive().length > 0);
 function attack(n) {
   if (G.mode !== 'battle' || !net) return;
   const foes = [...players.entries()].filter(([id, p]) => id !== uid && inRound(p) && !p.out);
@@ -483,32 +494,53 @@ function onGarbage(snap) {
   G.garbage.push(Math.max(1, Math.min(10, v.n | 0))); flash('+' + v.n + ' хог мөр ирлээ!');
 }
 function battleOut() {
-  myPlace = Math.max(1, alive().filter(p => p !== players.get(uid)).length + 1);
+  const others = alive().filter(p => p !== players.get(uid));
+  myPlace = others.length + 1;
   publish(true);
+  if (others.length === 0) { ended = meta.round; return showWin(null); }   // nobody left playing: the round is over
+  if (others.length === 1) { ended = meta.round; myPlace = 2; publish(true); return showWin(idOf(others[0])); }
   showCard(el('h2', '', 'Та унлаа'), el('div', 'big', myPlace + '-р байр'), el('p', '', 'Бусдын тоглолтыг үзэж байна…'));
 }
+const idOf = p => ([...players.entries()].find(([, q]) => q === p) || [])[0];
 function battleTick() {
-  // the last one standing wins
+  // the last one standing wins (players whose page stopped writing count as out)
   if (!meta || ended === meta.round || G.over) return;
   const others = [...players.entries()].filter(([id, p]) => id !== uid && inRound(p));
-  if (others.length && others.every(([, p]) => p.out) && performance.now() - G.t0 > 3000) { ended = meta.round; myPlace = 1; G.over = true; publish(true); sfx('win'); showWin(uid); }
+  if (others.length && others.every(([, p]) => p.out || !fresh(p)) && performance.now() - G.t0 > 3000) { ended = meta.round; myPlace = 1; G.over = true; publish(true); sfx('win'); showWin(uid); }
 }
-function showWin(id) {
-  const name = id === uid ? 'Та' : (players.get(id) && players.get(id).n) || 'Тоглогч';
-  const nodes = [el('h2', '', id === uid ? 'Та яллаа!' : name + ' яллаа'), el('div', 'big', '🏆'), el('p', '', (id === uid ? 'Та' : name) + ' хамгийн сүүлд үлдлээ.')];
-  if (canStart) nodes.push(el('div', 'row')), nodes[nodes.length - 1].append(btn('Дахин тулалдах', 'btn', startRound));
+function showWin(id) {   // id null: the round ended with nobody standing
+  const name = id === uid ? 'Та' : (id && players.get(id) && players.get(id).n) || 'Тоглогч';
+  const nodes = !id ? [el('h2', '', 'Тулаан дууслаа'), el('div', 'big', '🏁'), el('p', '', 'Тоглож буй хүн үлдсэнгүй.')]
+    : [el('h2', '', id === uid ? 'Та яллаа!' : name + ' яллаа'), el('div', 'big', '🏆'), el('p', '', (id === uid ? 'Та' : name) + ' хамгийн сүүлд үлдлээ.')];
+  if (canStart) { const r = el('div', 'row'); r.append(btn('Дахин тулалдах', 'btn', startRound)); nodes.push(r); }
   else nodes.push(el('p', '', CODE ? 'Өрөө нээсэн хүн дараагийн тулааныг эхлүүлнэ.' : 'Дахин эхлүүлэхийг хүлээж байна.'));
   showCard(...nodes);
 }
 function onPlayers() {
   paintOpps();
   if (!meta || G.mode !== 'battle') return;
-  // somebody else is the last one standing
-  if (G.over && ended !== meta.round) {
+  // I'm out (or watching): the round ends when one or nobody is still playing
+  if (G.over && ended !== meta.round && now() - meta.start > 5000 && G.round === meta.round) {
     const live = alive();
-    if (live.length === 1 && [...players.values()].filter(inRound).length > 1) { ended = meta.round; const id = [...players.entries()].find(([, p]) => p === live[0])[0]; showWin(id); }
+    if (live.length <= 1) {
+      // the winner marks itself out with place 1 once it has won, so look for that too
+      const won = live.length ? idOf(live[0]) : ([...players.entries()].find(([, p]) => inRound(p) && p.pl === 1) || [])[0];
+      ended = meta.round; showWin(won || null);
+    }
   }
 }
+// a battle needs the page in front: a tab hidden for 10 s (or a phone switched to another app) leaves the round,
+// so the others are not kept waiting on a board that no longer moves
+let hideT = 0;
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(hideT);
+  if (!document.hidden || G.mode !== 'battle' || G.over) return;
+  hideT = setTimeout(() => {
+    if (!document.hidden || G.mode !== 'battle' || G.over) return;
+    G.over = true; sfx('over'); battleOut();
+    flash('Хуудас нуугдсан тул тулаанаас гарлаа.');
+  }, 10000);
+});
 function paintOpps() {
   const box = $('#opps'); box.replaceChildren();
   const list = [...players.entries()].filter(([, p]) => !meta || inRound(p) || !p.r).sort((a, b) => (a[1].out ? 1 : 0) - (b[1].out ? 1 : 0));
@@ -526,9 +558,14 @@ function battleLobby() {
   if (!CFG) nodes.push(el('p', '', 'Тулаан зөвхөн онлайн хувилбарт ажиллана.'));
   else if (!net) nodes.push(el('p', '', 'Сервертэй холбогдож байна…'));
   else {
-    nodes.push(el('p', '', (CODE ? 'Өрөө ' + CODE : 'Нийтийн тулаан') + ' · Одоо энд ' + players.size + ' хүн'));
-    if (canStart) { nodes.push(el('div', 'row')); nodes[nodes.length - 1].append(btn('Тулаан эхлүүлэх', 'btn', startRound)); }
-    else nodes.push(el('p', '', CODE ? 'Өрөө нээсэн хүн тулааныг эхлүүлнэ.' : 'Хэн нэг нь эхлүүлэхийг хүлээж байна.'));
+    const here = players.size || 1, live = roundLive() && G.round !== (meta && meta.round);
+    nodes.push(el('p', '', (CODE ? 'Өрөө ' + CODE : 'Нийтийн тулаан') + ' · Одоо энд ' + here + ' хүн'));
+    if (live) nodes.push(el('p', '', 'Тулаан явагдаж байна (' + alive().length + ' хүн тоглож байна). Дараагийнхад орно.'));
+    if (canStart) {
+      const r = el('div', 'row'), b = btn(live ? 'Шинээр эхлүүлэх' : 'Тулаан эхлүүлэх', live ? 'btn ghost' : 'btn', startRound);
+      b.disabled = here < 2; r.append(b); nodes.push(r);
+      if (here < 2) nodes.push(el('p', '', 'Дор хаяж 2 хүн хэрэгтэй. Найздаа энэ хуудасны линкийг явуулаарай.'));
+    } else if (!live) nodes.push(el('p', '', CODE ? 'Өрөө нээсэн хүн тулааныг эхлүүлнэ.' : 'Хэн нэг нь эхлүүлэхийг хүлээж байна.'));
   }
   nodes.push(help());
   showCard(...nodes);
@@ -539,21 +576,27 @@ async function startRound() {
   try { await D.set(R('meta'), { by: uid, round: rid(), seed: Math.floor(Math.random() * 2 ** 31), start: t + 3500, at: t }); }
   catch { flash(CODE ? 'Тулааныг өрөө нээсэн хүн л эхлүүлнэ.' : 'Өөр хүний эхлүүлсэн тулаан явагдаж байна. Хэдэн минутын дараа дахин оролдоорой.'); }
 }
-let cdTimer = 0;
+let cdTimer = 0, cdTick = null, joined = '';
 function onMeta(v) {
   const prev = meta && meta.round;
   meta = v && typeof v.round === 'string' ? v : null;
+  if (meta && meta.round !== prev) { myPlace = 0; ended = ''; }
   if (!meta || meta.round === prev || mode !== 'battle') { if (mode === 'battle' && G.over) battleLobbyIfIdle(); return; }
-  // a new round: count down to its start, then everyone gets the same pieces
-  clearInterval(cdTimer); myPlace = 0; ended = ''; G.over = true;
-  const tick = () => {
+  joinRound();
+}
+// count down to the round's start (everyone gets the same pieces), or jump in if it began moments ago;
+// also called when switching to «Тулаан» and when a hidden tab comes back, so nobody misses a round
+function joinRound() {
+  if (!meta || mode !== 'battle' || joined === meta.round || now() - meta.start > 8000) return;
+  joined = meta.round; clearInterval(cdTimer); G.over = true;
+  cdTick = () => {
     const left = meta.start - now();
     if (left > 0) { showCard(el('h2', '', 'Бэлдээрэй!'), el('div', 'big', String(Math.ceil(left / 1000)))); return; }
-    clearInterval(cdTimer); G.round = meta.round; G.startLevel = 3; startGame('battle', meta.seed); flash('Эхэллээ!');
+    clearInterval(cdTimer); cdTick = null; G.round = meta.round; G.startLevel = 3; startGame('battle', meta.seed); flash('Эхэллээ!');
   };
-  if (meta.start - now() < -20000) return;   // an old round: just watch
-  tick(); cdTimer = setInterval(tick, 200);
+  cdTick(); if (cdTick) cdTimer = setInterval(() => cdTick && cdTick(), 200);
 }
+document.addEventListener('visibilitychange', () => { if (document.hidden) return; if (cdTick) cdTick(); else joinRound(); });
 function battleLobbyIfIdle() { if (ov.hidden === false && card.querySelector('.big')) return; battleLobby(); }
 
 /* ---------- start ---------- */

@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Нууц хорлогч · Цайны цаг</title>
+<meta name="description" content="Уурхайн баазад ажилчид даалгавраа хийж байхад тэдний дунд нууц хорлогч бий. Хурал хийж, санал өгч хорлогчийг ол. 4–10 хүн онлайн.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2317202B'/%3E%3Cpath d='M16 34a16 16 0 0 1 32 0z' fill='%23E8780A'/%3E%3Crect x='12' y='33' width='40' height='5' rx='2' fill='%23E8780A'/%3E%3Ccircle cx='32' cy='27' r='4' fill='%23FFE27A'/%3E%3Ctext x='32' y='56' font-size='16' text-anchor='middle' font-family='Arial' font-weight='700' fill='%23F06868'%3E%3F%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@700;800&display=swap">
+<style>
+/* Layout: the map fills the screen; HUD (tasks, progress) top-left, action buttons bottom-right; cards (lobby, task, meeting, result) float over it. */
+:root{--bg:#0E1318;--surface:#18202A;--sunk:#0C1117;--ink:#E6ECF2;--muted:#94A2B1;--line:#2A3440;--accent:#FF9426;--accent-ink:#1C1004;--accent-soft:#3B2914;--good:#3CC57A;--bad:#F06868;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 "Golos Text","Segoe UI",system-ui,sans-serif;-webkit-tap-highlight-color:transparent;overscroll-behavior:none;user-select:none;-webkit-user-select:none}
+button{font:inherit;color:inherit;cursor:pointer}
+[hidden]{display:none!important}
+#cv{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.hud{position:fixed;top:max(10px,env(safe-area-inset-top));left:max(10px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:8px;max-width:min(300px,60vw);pointer-events:none}
+.hud > *{pointer-events:auto}
+.top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:rgba(24,32,42,.88);border-radius:999px;padding:6px 12px;font-weight:600;font-size:13.5px;text-decoration:none;color:var(--ink)}
+.box{background:rgba(24,32,42,.88);border:1px solid var(--line);border-radius:12px;padding:8px 10px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.box b{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.bar{height:8px;border-radius:4px;background:var(--sunk);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--good);width:0;transition:width .3s}
+.task.ok{color:var(--good);text-decoration:line-through}
+.role{font-weight:800;font-family:Unbounded,sans-serif;font-size:13px}
+.role.imp{color:var(--bad)} .role.crew{color:#7FC4FF}
+.acts{position:fixed;right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));display:flex;gap:10px;align-items:flex-end}
+.act{width:78px;height:78px;border-radius:50%;border:2px solid var(--line);background:rgba(24,32,42,.9);font-weight:800;font-size:12.5px;display:grid;place-items:center;text-align:center;line-height:1.1;padding:6px}
+.act:disabled{opacity:.35;cursor:default}
+.act.use{border-color:#7FC4FF}
+.act.rep{border-color:var(--accent);color:var(--accent)}
+.act.kill{border-color:var(--bad);color:var(--bad)}
+.act small{display:block;font-weight:600;font-size:11px;opacity:.8}
+.toast{position:fixed;left:50%;top:max(14px,env(safe-area-inset-top));transform:translateX(-50%);background:rgba(24,32,42,.95);border:1px solid var(--line);border-radius:12px;padding:8px 14px;font-weight:700;max-width:90vw;text-align:center}
+.ov{position:fixed;inset:0;display:grid;place-items:center;background:rgba(8,11,15,.55);padding:14px;z-index:10}
+.ov.clear{background:transparent;pointer-events:none}
+.ov.clear .card{pointer-events:auto}
+.card{width:min(440px,100%);max-height:calc(100dvh - 28px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.card h2{margin:0;font-family:Unbounded,sans-serif;font-size:18px;text-align:center}
+.card p{margin:0;color:var(--muted);font-size:14px;text-align:center}
+.big{font-family:Unbounded,sans-serif;font-size:26px;font-weight:800;text-align:center}
+.big.imp{color:var(--bad)} .big.crew{color:#7FC4FF}
+.btn{border:0;border-radius:12px;padding:10px 16px;font-weight:700;background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn.sm{padding:6px 11px;font-size:13.5px;border-radius:10px}
+.btn:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center}
+input{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--sunk);color:var(--ink);font:inherit;width:100%;user-select:text}
+.ppl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.pp{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:13.5px;min-width:0;background:transparent;text-align:left}
+.pp .dot{width:16px;height:16px;border-radius:50%;flex:none;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
+.pp span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp.dead{opacity:.45;text-decoration:line-through}
+.pp.voted::after{content:"✓";margin-left:auto;color:var(--good);font-weight:800}
+button.pp:not(:disabled):hover{border-color:var(--accent)}
+button.pp.mine{border-color:var(--accent);background:var(--accent-soft)}
+.cols{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.cols button{width:30px;height:30px;border-radius:50%;border:2px solid transparent}
+.cols button[aria-pressed="true"]{border-color:#fff}
+.cols button:disabled{opacity:.25}
+.chat{display:flex;flex-direction:column;gap:4px;max-height:160px;overflow:auto;font-size:13.5px;text-align:left;background:var(--sunk);border-radius:10px;padding:8px;min-height:60px}
+.chat b{margin-right:4px}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+.timer{font-family:Unbounded,sans-serif;font-weight:800;text-align:center;color:var(--accent)}
+.hold{height:120px;border-radius:16px;border:2px solid var(--line);background:var(--sunk);position:relative;overflow:hidden;font-weight:800;font-size:16px;touch-action:none}
+.hold i{position:absolute;left:0;bottom:0;height:100%;width:0;background:color-mix(in srgb,var(--good) 45%,transparent)}
+.hold span{position:relative}
+.seq{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.seq button{height:58px;border-radius:12px;border:1px solid var(--line);background:var(--sunk);font-family:Unbounded,sans-serif;font-weight:800;font-size:20px}
+.seq button.ok{background:color-mix(in srgb,var(--good) 40%,var(--sunk));border-color:var(--good)}
+.wires{display:grid;grid-template-columns:1fr 1fr;gap:10px 40px}
+.wires button{height:44px;border-radius:10px;border:3px solid transparent}
+.wires button.sel{border-color:#fff}
+.wires button.ok{opacity:.35}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="hud">
+  <div class="top"><a class="chip" href="index.html" id="back">← Цэс</a><button class="chip" type="button" id="lobbyBtn">Лобби</button></div>
+  <div class="box" id="roleBox" hidden><span class="role" id="role"></span><span class="note" id="mates"></span></div>
+  <div class="box" id="progBox" hidden><b>Нийт даалгавар</b><div class="bar"><i id="prog"></i></div></div>
+  <div class="box" id="taskBox" hidden><b>Миний даалгавар</b><div id="tasks"></div></div>
+</div>
+<div class="acts" id="acts" hidden>
+  <button class="act kill" type="button" id="killBtn" hidden>ХӨНӨӨХ<small id="killCd"></small></button>
+  <button class="act rep" type="button" id="repBtn">МЭДЭГ­ДЭХ</button>
+  <button class="act use" type="button" id="useBtn">ХИЙХ</button>
+</div>
+<div class="toast" id="toast" hidden></div>
+<div class="ov" id="ov" hidden><div class="card" id="card"></div></div>
+
+<script src="firebase-config.js"></script>
+<script type="module">
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+const btn = (label, cls, fn) => { const b = el('button', cls, label); b.type = 'button'; b.onclick = fn; return b; };
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('tsai:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('tsai:' + k, JSON.stringify(v)); } catch {} },
+};
+const rid = () => Math.random().toString(36).slice(2, 10);
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+let myName = String(LS.get('nick', '') || '').trim().slice(0, 24);
+const CODE = ((location.hash.match(/r=([A-Za-z0-9]{4,6})/) || [])[1] || '').toUpperCase();
+const M = CODE || 'pub';
+if (CODE) $('#back').href = 'index.html#r=' + CODE;
+let actx = null;
+function sfx(kind) {
+  if (LS.get('mute', false)) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+    const f = { step: 300, ok: 760, kill: 110, alarm: 520, vote: 440, win: 1040, lose: 160, role: 330 }[kind] || 400;
+    o.type = kind === 'kill' || kind === 'alarm' || kind === 'lose' ? 'sawtooth' : 'triangle';
+    o.frequency.setValueAtTime(f, t);
+    if (kind === 'alarm') { o.frequency.linearRampToValueAtTime(f * 1.6, t + 0.25); o.frequency.linearRampToValueAtTime(f, t + 0.5); }
+    if (kind === 'ok' || kind === 'win') o.frequency.exponentialRampToValueAtTime(f * 1.5, t + 0.15);
+    const len = kind === 'alarm' ? 0.55 : kind === 'kill' || kind === 'lose' ? 0.45 : 0.14;
+    g.gain.setValueAtTime(0.07, t); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len + 0.05);
+  } catch {}
+}
+let toastT = 0;
+function toast(t, ms = 2600) { const b = $('#toast'); b.textContent = t; b.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { b.hidden = true; }, ms); }
+
+/* ---------- the mine camp: rooms joined by halls; everything walkable is inside one of these rectangles ---------- */
+const WW = 1600, WH = 980;
+const ROOMS = [
+  { n: 'Цайны газар', x: 640, y: 60, w: 320, h: 260, f: '#2E3B4B' },
+  { n: 'Оффис', x: 100, y: 80, w: 320, h: 220, f: '#2C3F3A' },
+  { n: 'Засварын газар', x: 1180, y: 80, w: 320, h: 240, f: '#41392C' },
+  { n: 'Генератор', x: 100, y: 620, w: 300, h: 240, f: '#432F2F' },
+  { n: 'Агуулах', x: 640, y: 640, w: 320, h: 260, f: '#35354A' },
+  { n: 'Хяналтын төв', x: 1200, y: 620, w: 300, h: 240, f: '#2B3D4F' },
+];
+const HALLS = [
+  { x: 420, y: 160, w: 220, h: 70 }, { x: 960, y: 160, w: 220, h: 70 }, { x: 765, y: 320, w: 70, h: 320 },
+  { x: 225, y: 300, w: 70, h: 320 }, { x: 1305, y: 320, w: 70, h: 300 }, { x: 225, y: 445, w: 1150, h: 70 },
+];
+const WALK = [...ROOMS, ...HALLS];
+const ST = [   // task stations: hold = press and hold, seq = numbers in order, wire = match the colours
+  { n: 'Компьютер шинэчлэх', k: 'seq', x: 170, y: 130 }, { n: 'Файл хадгалах', k: 'hold', x: 370, y: 260 },
+  { n: 'Хогоо асгах', k: 'hold', x: 690, y: 105 }, { n: 'Цай буцалгах', k: 'hold', x: 915, y: 280 },
+  { n: 'Утас холбох', k: 'wire', x: 1230, y: 125 }, { n: 'Дугуй хийлэх', k: 'hold', x: 1455, y: 280 },
+  { n: 'Генератор асаах', k: 'hold', x: 150, y: 680 }, { n: 'Утас холбох', k: 'wire', x: 355, y: 820 },
+  { n: 'Сав тоолох', k: 'seq', x: 690, y: 860 }, { n: 'Ачаа бүртгэх', k: 'seq', x: 915, y: 690 },
+  { n: 'Камер тохируулах', k: 'seq', x: 1250, y: 670 }, { n: 'Утас холбох', k: 'wire', x: 1455, y: 820 },
+];
+const BELL = { x: 800, y: 190 };   // the emergency button in the canteen
+const COLORS = ['#D93B3B', '#2F6FE0', '#2FA35B', '#E55FA8', '#F08A24', '#EAD03A', '#4A5560', '#E8ECEF', '#8A52D6', '#8A5A33', '#3CC9D6', '#9BE04A'];
+const CNAME = ['Улаан', 'Цэнхэр', 'Ногоон', 'Ягаан', 'Улбар шар', 'Шар', 'Саарал', 'Цагаан', 'Нил ягаан', 'Хүрэн', 'Цайвар цэнхэр', 'Цайвар ногоон'];
+const R = 15, SPEED = 210, USE = 70, KILL = 85, REPORT = 110, VIS = 230, VIS_IMP = 320, TASKS = 5, KILL_CD = 25, MEET_MS = 70000;
+const inside = (x, y) => WALK.some(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+const free = (x, y) => inside(x, y) && inside(x - R, y) && inside(x + R, y) && inside(x, y - R) && inside(x, y + R);
+const spawnAt = i => { const a = (i / 10) * Math.PI * 2; return [800 + Math.cos(a) * 80, 210 + Math.sin(a) * 70]; };
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/* ---------- drawing ---------- */
+const cv = $('#cv'), cx = cv.getContext('2d');
+let VW = 0, VH = 0, DPR = 1, ZOOM = 1;
+function fit() {
+  DPR = Math.min(2, devicePixelRatio || 1); VW = innerWidth; VH = innerHeight;
+  cv.width = VW * DPR; cv.height = VH * DPR;
+  ZOOM = Math.max(0.55, Math.min(1.6, Math.min(VW / 760, VH / 520)));
+}
+addEventListener('resize', fit); fit();
+const mapImg = (() => {
+  const c = document.createElement('canvas'); c.width = WW; c.height = WH;
+  const x = c.getContext('2d');
+  x.fillStyle = '#12171D'; x.fillRect(0, 0, WW, WH);
+  for (let i = 0; i < 900; i++) { x.fillStyle = `rgba(255,255,255,${Math.random() * 0.035})`; x.fillRect(Math.random() * WW, Math.random() * WH, 2 + Math.random() * 5, 2 + Math.random() * 4); }
+  x.fillStyle = '#26303A'; for (const r of HALLS) x.fillRect(r.x, r.y, r.w, r.h);
+  for (const r of ROOMS) {
+    x.fillStyle = r.f; x.fillRect(r.x, r.y, r.w, r.h);
+    x.strokeStyle = 'rgba(255,255,255,.05)'; x.lineWidth = 1;
+    for (let gx = r.x + 40; gx < r.x + r.w; gx += 40) { x.beginPath(); x.moveTo(gx, r.y); x.lineTo(gx, r.y + r.h); x.stroke(); }
+    for (let gy = r.y + 40; gy < r.y + r.h; gy += 40) { x.beginPath(); x.moveTo(r.x, gy); x.lineTo(r.x + r.w, gy); x.stroke(); }
+  }
+  // walls: thick outline of the walkable area
+  x.strokeStyle = '#4A5866'; x.lineWidth = 6;
+  for (const r of WALK) {
+    for (let px = r.x; px <= r.x + r.w; px += 4) { for (const py of [r.y - 3, r.y + r.h + 3]) if (!inside(px, py)) { x.fillStyle = '#4A5866'; x.fillRect(px - 2, py - 3, 4, 6); } }
+    for (let py = r.y; py <= r.y + r.h; py += 4) { for (const px of [r.x - 3, r.x + r.w + 3]) if (!inside(px, py)) { x.fillStyle = '#4A5866'; x.fillRect(px - 3, py - 2, 6, 4); } }
+  }
+  x.font = '700 18px Unbounded, sans-serif'; x.textAlign = 'center'; x.fillStyle = 'rgba(255,255,255,.16)';
+  for (const r of ROOMS) x.fillText(r.n.toUpperCase(), r.x + r.w / 2, r.y + r.h / 2 + 6);
+  // canteen table and the emergency button
+  x.fillStyle = '#4C5B6B'; x.beginPath(); x.arc(BELL.x, BELL.y, 44, 0, 7); x.fill();
+  x.fillStyle = '#B02A2A'; x.beginPath(); x.arc(BELL.x, BELL.y, 16, 0, 7); x.fill();
+  x.fillStyle = '#E04848'; x.beginPath(); x.arc(BELL.x, BELL.y - 3, 13, 0, 7); x.fill();
+  for (const s of ST) { x.fillStyle = '#5B6878'; x.fillRect(s.x - 16, s.y - 16, 32, 32); x.fillStyle = '#7C8A99'; x.fillRect(s.x - 12, s.y - 12, 24, 16); }
+  return c;
+})();
+function drawMiner(c, p, col, s, dead) {   // one worker: overalls in their colour, a hard hat with a lamp
+  c.save(); c.translate(p.x, p.y);
+  if (dead) {
+    c.rotate(Math.PI / 2);
+    c.fillStyle = col; c.beginPath(); c.ellipse(4, 0, 15, 11, 0, 0, 7); c.fill();
+    c.fillStyle = '#F2D2B0'; c.beginPath(); c.arc(-14, 0, 8, 0, 7); c.fill();
+    c.strokeStyle = '#17202B'; c.lineWidth = 1.6; c.beginPath(); c.moveTo(-17, -3); c.lineTo(-13, 1); c.moveTo(-13, -3); c.lineTo(-17, 1); c.stroke();
+    c.restore();
+    c.save(); c.translate(p.x + 20, p.y + 14); c.fillStyle = '#E8B23A'; c.beginPath(); c.arc(0, 0, 8, Math.PI, 0); c.fill(); c.restore();
+    return;
+  }
+  const bob = s ? Math.sin(performance.now() / 90) * 1.5 : 0;
+  c.fillStyle = 'rgba(0,0,0,.35)'; c.beginPath(); c.ellipse(0, 16, 14, 5, 0, 0, 7); c.fill();
+  c.fillStyle = col; c.beginPath(); c.roundRect ? c.roundRect(-12, -4 + bob, 24, 20, 7) : c.rect(-12, -4 + bob, 24, 20); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.55)'; c.fillRect(-12, 6 + bob, 24, 3);
+  c.fillStyle = '#F2D2B0'; c.beginPath(); c.arc(0, -10 + bob, 9, 0, 7); c.fill();
+  c.fillStyle = '#17202B'; const f = p.f || 1; c.beginPath(); c.arc(3 * f - 2, -10 + bob, 1.4, 0, 7); c.arc(3 * f + 3, -10 + bob, 1.4, 0, 7); c.fill();
+  c.fillStyle = col; c.beginPath(); c.arc(0, -13 + bob, 10.5, Math.PI, 0); c.fill(); c.fillRect(-13, -14 + bob, 26, 3);
+  c.fillStyle = '#FFE27A'; c.beginPath(); c.arc(0, -19 + bob, 2.8, 0, 7); c.fill();
+  c.restore();
+}
+
+/* ---------- state ---------- */
+const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
+let D = null, rdb = null, uid = 'local', net = false, offset = 0;
+const now = () => Date.now() + offset;
+const P = p => D.ref(rdb, 'imp/' + M + '/' + p);
+const me = { x: 800, y: 260, f: 1, c: LS.get('impColor', Math.floor(Math.random() * 12)), moving: false };
+let meta = null, players = new Map(), role = null, deadMap = {}, doneMap = {}, kills = [], votes = {}, chat = [];
+let tasksDone = new Set(), killReady = 0, bellUsed = false, roundSeen = '', meetSeen = '', endSeen = '';
+const inRound = () => meta && meta.round && meta.phase !== 'lobby' && String(meta.ps || '').split(',').includes(uid);
+const alive = id => !deadMap[id];
+const amHost = () => meta && meta.by === uid;
+const nameOf = id => (id === uid ? myName || 'Та' : (players.get(id) && players.get(id).n) || 'Тоглогч');
+const colOf = id => COLORS[(id === uid ? me.c : players.get(id) && players.get(id).c) | 0] || '#888';
+const roundPs = () => String((meta && meta.ps) || '').split(',').filter(Boolean);
+const myTasks = () => (role && role.t ? String(role.t).split(',').map(Number).filter(i => ST[i]) : []);
+
+/* ---------- input: keys or a thumb stick on the left half of the screen ---------- */
+const keys = {};
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.code] = true;
+  if (e.code === 'KeyE' || e.code === 'Space') { e.preventDefault(); useNear(); }
+  if (e.code === 'KeyR') reportNear();
+  if (e.code === 'KeyQ') killNear();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+let stick = null;
+cv.addEventListener('pointerdown', e => { if (e.clientX < VW * 0.6) { stick = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0 }; cv.setPointerCapture(e.pointerId); } });
+cv.addEventListener('pointermove', e => { if (stick && e.pointerId === stick.id) { stick.dx = e.clientX - stick.x0; stick.dy = e.clientY - stick.y0; } });
+const endStick = e => { if (stick && e.pointerId === stick.id) stick = null; };
+cv.addEventListener('pointerup', endStick); cv.addEventListener('pointercancel', endStick);
+$('#useBtn').onclick = () => useNear();
+$('#repBtn').onclick = () => reportNear();
+$('#killBtn').onclick = () => killNear();
+
+/* ---------- loop ---------- */
+let last = performance.now(), lastPub = 0, pubKey = '';
+const canMove = () => !openTask && !(meta && meta.phase === 'meet') && !(splashUntil > performance.now());
+let splashUntil = 0;
+function frame(t) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (t - last) / 1000); last = t;
+  const ghost = inRound() && !alive(uid);
+  // move
+  let mx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0), my = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
+  if (stick) { const l = Math.hypot(stick.dx, stick.dy); if (l > 8) { mx = stick.dx / Math.max(l, 50); my = stick.dy / Math.max(l, 50); } }
+  const l = Math.hypot(mx, my); me.moving = false;
+  if (l > 0.05 && canMove()) {
+    const sp = (ghost ? 250 : SPEED) * dt / Math.max(1, l);
+    const nx = me.x + mx * sp, ny = me.y + my * sp;
+    if (ghost) { me.x = Math.max(20, Math.min(WW - 20, nx)); me.y = Math.max(20, Math.min(WH - 20, ny)); }
+    else { if (free(nx, me.y)) me.x = nx; if (free(me.x, ny)) me.y = ny; }
+    if (mx) me.f = mx > 0 ? 1 : -1;
+    me.moving = true;
+  }
+  if (openTask && Math.hypot(me.x - ST[openTask.i].x, me.y - ST[openTask.i].y) > USE + 30) closeTask();
+  publish(t);
+  hostTick();
+  draw(t, ghost);
+  paintActs(ghost);
+}
+function publish(t) {
+  if (!net) return;
+  const key = Math.round(me.x) + ',' + Math.round(me.y) + ',' + me.c;
+  if (t - lastPub < (me.moving ? 120 : 2000) || (key === pubKey && t - lastPub < 2000)) return;
+  lastPub = t; pubKey = key;
+  D.set(P('p/' + uid), { n: myName || 'Тоглогч', c: me.c, x: Math.round(me.x), y: Math.round(me.y), f: me.f, at: now() }).catch(() => {});
+}
+function draw(t, ghost) {
+  const c = cx; c.setTransform(DPR, 0, 0, DPR, 0, 0);
+  c.fillStyle = '#0B0F13'; c.fillRect(0, 0, VW, VH);
+  const camX = me.x - VW / 2 / ZOOM, camY = me.y - VH / 2 / ZOOM;
+  c.setTransform(DPR * ZOOM, 0, 0, DPR * ZOOM, -camX * DPR * ZOOM, -camY * DPR * ZOOM);
+  c.drawImage(mapImg, 0, 0);
+  const vis = ghost || !inRound() ? 1e9 : role && role.r === 'imp' ? VIS_IMP : VIS;
+  const seen = q => Math.hypot(q.x - me.x, q.y - me.y) < vis + 20;
+  // my stations glow
+  if (inRound() && role && meta.phase === 'play') for (const i of myTasks()) if (!tasksDone.has(i)) {
+    const s = ST[i], a = 0.45 + 0.35 * Math.sin(t / 250);
+    c.strokeStyle = `rgba(255,226,122,${a})`; c.lineWidth = 4; c.strokeRect(s.x - 20, s.y - 20, 40, 40);
+  }
+  // bodies since the last meeting
+  for (const k of kills) if (seen(k) && k.at >= ((meta && meta.clean) || 0)) drawMiner(c, k, colOf(k.v), false, true);
+  // other workers (ghosts only see ghosts)
+  c.font = '600 12px Golos Text, sans-serif'; c.textAlign = 'center';
+  for (const [id, p] of players) {
+    if (id === uid || !p.dx) continue;
+    if (now() - (p.at || 0) > 20000) continue;
+    const dead = inRound() && roundPs().includes(id) && !alive(id);
+    if (dead && !ghost) continue;
+    if (!seen(p.dx)) continue;
+    c.globalAlpha = dead ? 0.45 : 1;
+    drawMiner(c, { x: p.dx.x, y: p.dx.y, f: p.f }, COLORS[p.c | 0] || '#888', p.mv);
+    c.fillStyle = role && role.r === 'imp' && role.m && role.m.includes(id) ? '#F06868' : '#fff';
+    c.fillText(p.n || 'Тоглогч', p.dx.x, p.dx.y - 30);
+    c.globalAlpha = 1;
+  }
+  c.globalAlpha = ghost ? 0.5 : 1;
+  drawMiner(c, me, COLORS[me.c], me.moving);
+  c.fillStyle = role && role.r === 'imp' && inRound() ? '#F06868' : '#fff'; c.fillText(myName || 'Та', me.x, me.y - 30);
+  c.globalAlpha = 1;
+  // darkness outside the helmet lamp
+  if (vis < 1e8) {
+    c.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const sx = VW / 2, sy = VH / 2, rad = vis * ZOOM;
+    const g = c.createRadialGradient(sx, sy, rad * 0.55, sx, sy, rad);
+    g.addColorStop(0, 'rgba(5,7,10,0)'); g.addColorStop(1, 'rgba(5,7,10,.93)');
+    c.fillStyle = g; c.fillRect(0, 0, VW, VH);
+  }
+}
+// smooth other players towards their last known place
+setInterval(() => {
+  for (const p of players.values()) {
+    if (!p.dx) p.dx = { x: p.x, y: p.y };
+    const ox = p.dx.x, oy = p.dx.y;
+    p.dx.x += (p.x - p.dx.x) * 0.35; p.dx.y += (p.y - p.dx.y) * 0.35;
+    p.mv = Math.abs(p.dx.x - ox) + Math.abs(p.dx.y - oy) > 0.5;
+  }
+}, 33);
+
+/* ---------- actions near me ---------- */
+function nearStation() {
+  if (!inRound() || meta.phase !== 'play') return -1;
+  let best = -1, bd = USE;
+  for (const i of myTasks()) { if (tasksDone.has(i)) continue; const d = Math.hypot(me.x - ST[i].x, me.y - ST[i].y); if (d < bd) { bd = d; best = i; } }
+  return best;
+}
+const nearBell = () => inRound() && meta.phase === 'play' && alive(uid) && Math.hypot(me.x - BELL.x, me.y - BELL.y) < 70;
+function nearBody() {
+  if (!inRound() || meta.phase !== 'play' || !alive(uid)) return null;
+  for (const k of kills) if (k.at >= (meta.clean || 0) && Math.hypot(me.x - k.x, me.y - k.y) < REPORT) return k;
+  return null;
+}
+function nearVictim() {
+  if (!inRound() || meta.phase !== 'play' || !role || role.r !== 'imp' || !alive(uid)) return null;
+  let best = null, bd = KILL;
+  for (const id of roundPs()) {
+    if (id === uid || !alive(id) || (role.m || []).includes(id)) continue;
+    const p = players.get(id); if (!p || !p.dx) continue;
+    const d = Math.hypot(me.x - p.dx.x, me.y - p.dx.y); if (d < bd) { bd = d; best = id; }
+  }
+  return best;
+}
+function paintActs(ghost) {
+  const on = inRound() && meta.phase === 'play';
+  $('#acts').hidden = !on;
+  if (!on) return;
+  const st = nearStation(), bell = nearBell() && !bellUsed && now() > (meta.resume || 0) + 15000;
+  const u = $('#useBtn'); u.disabled = st < 0 && !bell; u.textContent = st < 0 && bell ? 'ХУРАЛ' : 'ХИЙХ';
+  $('#repBtn').disabled = !nearBody(); $('#repBtn').hidden = ghost;
+  const k = $('#killBtn'); k.hidden = !role || role.r !== 'imp' || ghost;
+  if (!k.hidden) { const cd = Math.max(0, Math.ceil((killReady - now()) / 1000)); k.disabled = cd > 0 || !nearVictim(); $('#killCd').textContent = cd ? cd + 'с' : ''; }
+}
+function useNear() {
+  if (openTask || !inRound() || meta.phase !== 'play') return;
+  const i = nearStation();
+  if (i >= 0) return openTaskCard(i);
+  if (nearBell() && !bellUsed && now() > (meta.resume || 0) + 15000) { bellUsed = true; callMeeting(''); }
+}
+function reportNear() { const k = nearBody(); if (k) callMeeting(k.v); }
+function killNear() {
+  const v = nearVictim(); if (!v || now() < killReady) return;
+  const p = players.get(v);
+  killReady = now() + KILL_CD * 1000;
+  sfx('kill');
+  D.push(P('kill/' + meta.round), { by: uid, v, x: Math.round(p.x), y: Math.round(p.y), at: now() }).catch(() => {});
+}
+function callMeeting(body) { D.push(P('call/' + meta.round), { by: uid, b: body || '', at: now() }).catch(() => {}); }
+
+/* ---------- tasks (small games) ---------- */
+let openTask = null;
+const ov = $('#ov'), card = $('#card');
+function showCard(clear, ...nodes) { card.replaceChildren(...nodes); delete card.dataset.splash; ov.hidden = false; ov.classList.toggle('clear', !!clear); }
+function hideCard() { ov.hidden = true; }
+function closeTask() { openTask = null; hideCard(); }
+function taskDone(i) {
+  tasksDone.add(i); sfx('ok'); closeTask(); paintTasks();
+  if (role && role.r === 'crew' && net) D.set(P('done/' + meta.round + '/' + uid), tasksDone.size).catch(() => {});
+  toast('«' + ST[i].n + '» хийгдлээ');
+}
+function openTaskCard(i) {
+  const s = ST[i]; openTask = { i };
+  const nodes = [el('h2', '', s.n)];
+  if (s.k === 'hold') {
+    const b = el('button', 'hold'), bar = el('i'); b.type = 'button'; b.append(bar, el('span', '', 'Дараад барь'));
+    let t0 = 0, raf = 0;
+    const step = () => { const p = Math.min(1, (performance.now() - t0) / 2600); bar.style.width = p * 100 + '%'; if (p >= 1) { taskDone(i); return; } raf = requestAnimationFrame(step); };
+    b.addEventListener('pointerdown', e => { e.preventDefault(); t0 = performance.now(); cancelAnimationFrame(raf); raf = requestAnimationFrame(step); });
+    const stop = () => { cancelAnimationFrame(raf); bar.style.width = '0'; };
+    b.addEventListener('pointerup', stop); b.addEventListener('pointerleave', stop); b.addEventListener('pointercancel', stop);
+    nodes.push(b, el('p', '', 'Дүүрэх хүртэл товчоо бүү тавь.'));
+  } else if (s.k === 'seq') {
+    const g = el('div', 'seq'); let next = 1;
+    for (const n of shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9])) {
+      const b = btn(String(n), '', () => { if (n !== next) { next = 1; for (const x of g.children) x.classList.remove('ok'); sfx('lose'); return; } b.classList.add('ok'); next++; sfx('step'); if (next > 9) taskDone(i); });
+      g.append(b);
+    }
+    nodes.push(g, el('p', '', '1-ээс 9 хүртэл дарааллаар нь товш.'));
+  } else {
+    const W4 = [0, 1, 2, 5], left = shuffle(W4.slice()), right = shuffle(W4.slice()), g = el('div', 'wires'); let sel = null, ok = 0;
+    const L = left.map(c => { const b = btn('', '', () => { if (b.classList.contains('ok')) return; for (const x of L) x.classList.remove('sel'); b.classList.add('sel'); sel = { c, b }; }); b.style.background = COLORS[c]; return b; });
+    const Rr = right.map(c => { const b = btn('', '', () => { if (!sel || b.classList.contains('ok')) return; if (sel.c === c) { b.classList.add('ok'); sel.b.classList.add('ok'); sel.b.classList.remove('sel'); sel = null; ok++; sfx('step'); if (ok === 4) taskDone(i); } else { sel.b.classList.remove('sel'); sel = null; sfx('lose'); } }); b.style.background = COLORS[c]; return b; });
+    for (let k = 0; k < 4; k++) g.append(L[k], Rr[k]);
+    nodes.push(g, el('p', '', 'Зүүн талын утсыг ижил өнгөтэй баруун талынхтай нь холбо.'));
+  }
+  nodes.push(el('div', 'row')); nodes[nodes.length - 1].append(btn('Хаах', 'btn ghost', closeTask));
+  showCard(true, ...nodes);
+}
+function paintTasks() {
+  const box = $('#tasks'); box.replaceChildren();
+  for (const i of myTasks()) box.append(el('div', 'task' + (tasksDone.has(i) ? ' ok' : ''), ST[i].n + ' · ' + roomOf(ST[i])));
+  const ps = roundPs(), crew = Math.max(1, ps.length - ((meta && meta.ni) | 0)), total = crew * TASKS;
+  const done = Object.entries(doneMap).reduce((a, [, v]) => a + Math.min(TASKS, Number(v) || 0), 0);
+  $('#prog').style.width = Math.min(100, (done / total) * 100) + '%';
+}
+const roomOf = s => (ROOMS.find(r => s.x >= r.x && s.x <= r.x + r.w && s.y >= r.y && s.y <= r.y + r.h) || { n: '' }).n;
+
+/* ---------- lobby, role, meeting, end ---------- */
+function nameRow() {
+  const r = el('div', 'row'), inp = el('input'); inp.placeholder = 'Нэрээ бичээрэй'; inp.maxLength = 24; inp.value = myName;
+  const ok = btn('Хадгалах', 'btn', () => { const n = inp.value.trim().slice(0, 24); if (!n) return; myName = n; LS.set('nick', n); if (net) D.set(D.ref(rdb, 'names/' + uid), n).catch(() => {}); lobby(); });
+  inp.onkeydown = e => { if (e.key === 'Enter') ok.click(); };
+  r.append(inp, ok); return r;
+}
+function lobby() {
+  if (meta && meta.phase === 'meet' && inRound()) return meetingCard();
+  const nodes = [el('h2', '', 'Нууц хорлогч')];
+  if (!CFG) { nodes.push(el('p', '', 'Энэ тоглоом зөвхөн линкээр нээдэг онлайн хувилбарт олуулаа тоглогдоно.')); return showCard(false, ...nodes); }
+  if (!net) { nodes.push(el('p', '', 'Сервертэй холбогдож байна…')); return showCard(false, ...nodes); }
+  if (!myName) { nodes.push(el('p', '', 'Эхлээд нэрээ бичээрэй.'), nameRow()); return showCard(false, ...nodes); }
+  nodes.push(el('p', '', 'Уурхайн баазад ажилчид даалгавраа хийж байна. Тэдний дунд нууц хорлогч бий. Ажилчид даалгавраа дуусгах эсвэл хорлогчийг санал хурааж гаргавал ялна. Хорлогч ажилчдыг цөөлж тэдэнтэй тэнцвэл ялна.'));
+  const here = present();
+  const grid = el('div', 'ppl');
+  for (const [id, p] of here) { const d = el('div', 'pp'), dot = el('span', 'dot'); dot.style.background = COLORS[p.c | 0]; d.append(dot, el('span', '', id === uid ? (myName || 'Та') + ' (та)' : p.n)); grid.append(d); }
+  nodes.push(el('p', 'note', (CODE ? 'Өрөө ' + CODE : 'Нийтийн тоглолт') + ' · одоо энд ' + here.length + ' хүн (4–10 хүнтэй сайхан)'), grid);
+  const taken = new Set(here.filter(([id]) => id !== uid).map(([, p]) => p.c | 0)), cols = el('div', 'cols');
+  COLORS.forEach((col, i) => { const b = btn('', '', () => { me.c = i; LS.set('impColor', i); lastPub = 0; lobby(); }); b.style.background = col; b.title = CNAME[i]; b.setAttribute('aria-pressed', String(i === me.c)); b.disabled = taken.has(i) && i !== me.c; cols.append(b); });
+  nodes.push(el('p', 'note', 'Өнгөө сонго'), cols);
+  const running = meta && /^(deal|play|meet)$/.test(meta.phase);
+  const r = el('div', 'row');
+  if (running && !inRound()) nodes.push(el('p', '', 'Тоглолт явагдаж байна. Дараагийн тоглолтод орно, одоо газар дээр алхаж болно.'));
+  else if (canStart()) r.append(Object.assign(btn('Тоглолт эхлүүлэх', 'btn', startRound), { disabled: here.length < 3 }));
+  else nodes.push(el('p', 'note', CODE ? 'Өрөө нээсэн хүн тоглолтыг эхлүүлнэ.' : 'Хэн нэг нь тоглолтыг эхлүүлэхийг хүлээж байна.'));
+  r.append(btn('Газар дээр алхах', 'btn ghost', hideCard));
+  nodes.push(r, el('p', 'note', 'Удирдлага: WASD/сум эсвэл дэлгэцийн зүүн талыг чирэх. E/Space хийх, R мэдэгдэх, Q хөнөөх (хорлогч).'));
+  showCard(false, ...nodes);
+}
+$('#lobbyBtn').onclick = () => (ov.hidden ? lobby() : !openTask && meta && meta.phase !== 'meet' ? hideCard() : null);
+const present = () => [...players.entries()].filter(([id, p]) => id === uid || now() - (p.at || 0) < 15000);
+let roomBy = null;
+const canStart = () => !(meta && /^(deal|play|meet)$/.test(meta.phase) && now() - (meta.at || 0) < 120000) && (CODE ? roomBy === uid : true);
+async function startRound() {
+  const ps = present().map(([id]) => id);
+  if (ps.length < 3) return toast('Дор хаяж 3 хүн хэрэгтэй.');
+  const round = rid(), ni = ps.length >= 7 ? 2 : 1, order = shuffle(ps.slice()), imps = order.slice(0, ni), old = meta && meta.round;
+  try {
+    // 1) claim the game (the rules let only the game's host deal roles), 2) clear the last round, 3) deal, 4) go
+    await D.set(P('meta'), { by: uid, round, phase: 'deal', ps: ps.join(','), ni, start: now(), clean: now(), resume: now(), at: now() });
+    if (old) for (const k of ['kill', 'dead', 'done', 'call', 'vote', 'chat', 'role']) await D.remove(P(k + '/' + old)).catch(() => {});
+    roleCache[round] = {};
+    for (const id of ps) {
+      const tasks = shuffle(ST.map((_, i) => i)).slice(0, TASKS).join(','), imp = imps.includes(id);
+      roleCache[round][id] = imp ? 'imp' : 'crew';
+      await D.set(P('role/' + round + '/' + id), imp ? { r: 'imp', m: imps.join(','), t: tasks } : { r: 'crew', m: '', t: tasks });
+    }
+    await D.update(P('meta'), { phase: 'play', start: now(), clean: now(), resume: now(), at: now() });
+  } catch { toast('Тоглолт эхлүүлэх эрхгүй байна.'); }
+}
+function roleSplash() {
+  const imp = role.r === 'imp';
+  const mates = (role.m || []).filter(id => id !== uid).map(nameOf);
+  showCard(false, el('h2', '', 'Таны үүрэг'), el('div', 'big ' + (imp ? 'imp' : 'crew'), imp ? 'ХОРЛОГЧ' : 'АЖИЛТАН'),
+    el('p', '', imp ? 'Ажилчдыг нэг нэгээр нь хөнөөж, сэжиг төрүүлэхгүй бай. ' + (mates.length ? 'Хамсаатан: ' + mates.join(', ') : '') : 'Даалгавруудаа хий, хорлогчийг ол. Цогцос олбол мэдэгдэж хурал зарла.'),
+    el('div', 'row'));
+  card.lastChild.append(btn('Эхлэх', 'btn', hideCard));
+  const tag = card.dataset.splash = meta.round;
+  splashUntil = performance.now() + 1500; sfx('role');
+  $('#role').textContent = imp ? 'Хорлогч' : 'Ажилтан'; $('#role').className = 'role ' + (imp ? 'imp' : 'crew');
+  $('#mates').textContent = imp && mates.length ? 'Хамсаатан: ' + mates.join(', ') : imp ? 'Ажлын дүр эсгэж, ганцаардсан хүнийг ол.' : '';
+  setTimeout(() => { if (!ov.hidden && card.dataset.splash === tag) hideCard(); }, 4500);   // only if the role card is still the one up
+}
+let myVote = '', chatT = 0;
+function meetingCard() {
+  const m = meta.meet || {}, left = Math.max(0, Math.ceil(((m.ends || 0) - now()) / 1000));
+  const nodes = [el('h2', '', m.b ? 'Цогцос олдлоо!' : 'Яаралтай хурал'), el('p', '', nameOf(m.by) + (m.b ? ' ' + nameOf(m.b) + '-ийн цогцсыг оллоо.' : ' хурал зарлалаа.')), el('div', 'timer', left + ' сек')];
+  const grid = el('div', 'ppl'), vs = votes[m.id] || {}, canVote = alive(uid) && !vs[uid];
+  for (const id of roundPs()) {
+    const dead = !alive(id), b = el(canVote && !dead ? 'button' : 'div', 'pp' + (dead ? ' dead' : '') + (vs[id] ? ' voted' : '') + (myVote === id ? ' mine' : '')), dot = el('span', 'dot');
+    dot.style.background = colOf(id); b.append(dot, el('span', '', nameOf(id) + (id === uid ? ' (та)' : '')));
+    if (canVote && !dead) { b.type = 'button'; b.onclick = () => castVote(id); }
+    grid.append(b);
+  }
+  nodes.push(grid);
+  const r = el('div', 'row');
+  if (canVote) r.append(btn('Алгасах', 'btn ghost sm', () => castVote('skip')));
+  else nodes.push(el('p', 'note', alive(uid) ? 'Та санал өглөө. Бусдыг хүлээж байна.' : 'Та сүнс болсон тул санал өгөхгүй, зөвхөн харна.'));
+  nodes.push(r);
+  const box = el('div', 'chat');
+  for (const c of chat.filter(c => c.mt === m.id).slice(-40)) { const d = el('div'), b = el('b', '', nameOf(c.by) + ':'); b.style.color = colOf(c.by); d.append(b, document.createTextNode(c.t)); box.append(d); }
+  nodes.push(box);
+  if (alive(uid)) {
+    const inp = el('input'); inp.maxLength = 120; inp.placeholder = 'Бичих… (Enter)';
+    inp.onkeydown = e => { if (e.key === 'Enter') { const t = inp.value.trim().slice(0, 120); if (!t || performance.now() < chatT) return; chatT = performance.now() + 1500; inp.value = ''; D.push(P('chat/' + meta.round), { by: uid, t, mt: m.id, at: now() }).catch(() => {}); } };
+    nodes.push(inp);
+    const keep = document.activeElement && document.activeElement.tagName === 'INPUT' ? document.activeElement.value : null;
+    showCard(false, ...nodes);
+    if (keep != null) { inp.value = keep; inp.focus(); }
+  } else showCard(false, ...nodes);
+  box.scrollTop = box.scrollHeight;
+}
+function castVote(id) { myVote = id; sfx('vote'); D.set(P('vote/' + meta.round + '/' + meta.meet.id + '/' + uid), id).catch(() => {}); }
+setInterval(() => { if (meta && meta.phase === 'meet' && inRound() && !ov.hidden && card.querySelector('.timer')) { const t = card.querySelector('.timer'); t.textContent = Math.max(0, Math.ceil(((meta.meet && meta.meet.ends) - now()) / 1000)) + ' сек'; } }, 500);
+async function endCard() {
+  const e = meta.end || {}, imps = String(e.imps || '').split(',').filter(Boolean), crewWon = e.w === 'crew';
+  const mine = role && inRound() && (crewWon ? role.r === 'crew' : role.r === 'imp');
+  sfx(mine ? 'win' : 'lose');
+  const why = { tasks: 'Ажилчид бүх даалгавраа дуусгалаа.', vote: 'Хорлогч санал хураалтаар гарлаа.', kill: 'Хорлогч ажилчидтай тэнцлээ.', left: 'Хорлогч тоглоомоос гарлаа.' }[e.why] || '';
+  const nodes = [el('h2', '', crewWon ? 'Ажилчид яллаа!' : 'Хорлогч яллаа!'), el('div', 'big ' + (crewWon ? 'crew' : 'imp'), mine ? 'ТА ЯЛЛАА' : inRound() ? 'ТА ЯЛАГДЛАА' : '—'), el('p', '', why), el('p', '', 'Хорлогч: ' + imps.map(nameOf).join(', '))];
+  const r = el('div', 'row');
+  if (canStartAfterEnd()) r.append(btn('Дахин тоглох', 'btn', startRound));
+  r.append(btn('Лобби', 'btn ghost', () => { lobby(); }));
+  nodes.push(r);
+  showCard(false, ...nodes);
+  if (mine && net) {
+    const key = meta.round, done = LS.get('impWins', []);
+    if (done.includes(key)) return;
+    LS.set('impWins', done.concat(key).slice(-40));
+    try {
+      // running total of points plus today's and this week's (Ulaanbaatar time), as the hub's board reads them
+      const add = role.r === 'imp' ? 3 : 1, ref = D.ref(rdb, 'scores/' + uid + '/imp'), o = (await D.get(ref)).val() || {};
+      const t = now(), dk = Math.floor((t + 288e5) / 864e5), wk = Math.floor((dk + 3) / 7);
+      const sum = (cur, same) => (same ? Number(cur) || 0 : 0) + add;
+      await D.set(ref, { best: (Number(o.best) || 0) + add, at: t, db: sum(o.db, o.dk === dk), dk, wb: sum(o.wb, o.wk === wk), wk });
+    } catch {}
+  }
+}
+const canStartAfterEnd = () => (CODE ? roomBy === uid : true);
+
+/* ---------- the host keeps the game moving: meetings, vote count, win check ---------- */
+let hostBusy = false, lastBeat = 0, calls = [];
+async function hostTick() {
+  if (!amHost() || !meta || hostBusy || !net) return;
+  const t = now();
+  if (meta.phase === 'play' || meta.phase === 'meet') {
+    if (t - lastBeat > 20000) { lastBeat = t; D.update(P('meta'), { at: t }).catch(() => {}); }
+    if (!roleCache[meta.round]) { hostBusy = true; await loadRoles(meta.round); hostBusy = false; }
+  }
+  if (meta.phase === 'play') {
+    const call = calls.find(c => c.at > (meta.resume || 0) && alive(c.by));
+    if (call) { hostBusy = true; await D.update(P('meta'), { phase: 'meet', meet: { id: call.k, by: call.by, b: call.b || '', ends: t + MEET_MS }, clean: t, at: t }).catch(() => {}); hostBusy = false; return; }
+    const w = winner(); if (w) { hostBusy = true; await finish(w[0], w[1]); hostBusy = false; }
+  } else if (meta.phase === 'meet' && meta.meet) {
+    const vs = votes[meta.meet.id] || {}, voters = roundPs().filter(alive);
+    if (t >= meta.meet.ends || voters.every(id => vs[id])) {
+      hostBusy = true;
+      const tally = {}; for (const id of voters) if (vs[id]) tally[vs[id]] = (tally[vs[id]] || 0) + 1;
+      const best = Object.entries(tally).sort((a, b) => b[1] - a[1]);
+      let out = '';
+      if (best.length && best[0][0] !== 'skip' && (best.length === 1 || best[0][1] > best[1][1])) out = best[0][0];
+      if (out) { deadMap[out] = 'v'; await D.set(P('dead/' + meta.round + '/' + out), 'v').catch(() => {}); }
+      const impsOut = out ? (await isImp(out)) : false;
+      await D.update(P('meta'), { phase: 'play', meet: null, ej: { u: out, imp: impsOut, at: t }, resume: t, clean: t, at: t }).catch(() => {});
+      hostBusy = false;
+    }
+  }
+}
+const roleCache = {};
+async function isImp(id) {
+  if (roleCache[meta.round] && roleCache[meta.round][id]) return roleCache[meta.round][id] === 'imp';
+  return false;
+}
+function winner() {
+  const ps = roundPs(), rr = roleCache[meta.round]; if (!rr) return null;
+  const imps = ps.filter(id => rr[id] === 'imp' && alive(id)).length, crew = ps.filter(id => rr[id] !== 'imp' && alive(id)).length;
+  const gone = id => !players.has(id) || now() - (players.get(id).at || 0) > 60000;
+  if (ps.filter(id => rr[id] === 'imp').every(id => !alive(id))) return ['crew', 'vote'];
+  if (ps.filter(id => rr[id] === 'imp').every(id => !alive(id) || gone(id))) return ['crew', 'left'];
+  if (imps >= crew) return ['imp', 'kill'];
+  const crewAll = ps.filter(id => rr[id] !== 'imp'), done = crewAll.reduce((a, id) => a + Math.min(TASKS, Number(doneMap[id]) || 0), 0);
+  if (done >= crewAll.length * TASKS) return ['crew', 'tasks'];
+  return null;
+}
+async function finish(w, why) {
+  const rr = roleCache[meta.round] || {};
+  await D.update(P('meta'), { phase: 'end', end: { w, why, imps: roundPs().filter(id => rr[id] === 'imp').join(',') }, at: now() }).catch(() => {});
+}
+
+/* ---------- Firebase wiring ---------- */
+const CFG = window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.databaseURL ? window.FIREBASE_CONFIG : null;
+let subs = [];
+function watchRound(round) {
+  for (const off of subs) off(); subs = [];
+  deadMap = {}; doneMap = {}; kills = []; votes = {}; chat = []; calls = [];
+  tasksDone = new Set(); bellUsed = false; role = null; myVote = '';
+  if (!round) return;
+  subs.push(D.onValue(P('dead/' + round), s => { deadMap = s.val() || {}; onDead(); }, () => {}));
+  subs.push(D.onValue(P('done/' + round), s => { doneMap = s.val() || {}; paintTasks(); }, () => {}));
+  subs.push(D.onChildAdded(P('kill/' + round), s => { const k = s.val(); if (!k) return; kills.push(k); if (k.v === uid && !deadMap[uid]) { deadMap[uid] = 'k'; D.set(P('dead/' + round + '/' + uid), 'k').catch(() => {}); sfx('kill'); toast('Таныг хөнөөлөө! Одоо та сүнс: даалгавраа үргэлжлүүлж болно.', 4000); } if (amHost() && !deadMap[k.v]) D.set(P('dead/' + round + '/' + k.v), 'k').catch(() => {}); }, () => {}));
+  subs.push(D.onChildAdded(P('call/' + round), s => { const c = s.val(); if (c) calls.push({ ...c, k: s.key }); }, () => {}));
+  subs.push(D.onValue(P('vote/' + round), s => { votes = s.val() || {}; if (meta && meta.phase === 'meet' && inRound() && !ov.hidden) meetingCard(); }, () => {}));
+  subs.push(D.onChildAdded(P('chat/' + round), s => { const c = s.val(); if (c && typeof c.t === 'string') { chat.push(c); if (meta && meta.phase === 'meet' && inRound()) meetingCard(); } }, () => {}));
+  subs.push(D.onValue(P('role/' + round + '/' + uid), s => { const v = s.val(); if (!v || role) return; role ={ r: v.r === 'imp' ? 'imp' : 'crew', m: String(v.m || '').split(',').filter(Boolean), t: v.t }; onRole(); }, () => {}));
+}
+function onDead() { paintTasks(); }
+function onRole() {
+  $('#roleBox').hidden = false; $('#progBox').hidden = false; $('#taskBox').hidden = false;
+  killReady = now() + 12000;
+  paintTasks(); roleSplash();
+}
+async function onMeta(v) {
+  const prev = meta; meta = v && typeof v === 'object' ? v : null;
+  if (!meta) { $('#roleBox').hidden = $('#progBox').hidden = $('#taskBox').hidden = true; return lobby(); }
+  if (meta.round !== roundSeen) {
+    roundSeen = meta.round; meetSeen = ''; endSeen = '';
+    watchRound(meta.round);
+    if (amHost() && !roleCache[meta.round]) await loadRoles(meta.round);
+    if (inRound()) { const i = roundPs().indexOf(uid); [me.x, me.y] = spawnAt(i); }
+    else { $('#roleBox').hidden = $('#progBox').hidden = $('#taskBox').hidden = true; }
+  }
+  if (meta.phase === 'meet' && meta.meet && meta.meet.id !== meetSeen) { meetSeen = meta.meet.id; closeTask(); sfx('alarm'); myVote = ''; if (inRound()) meetingCard(); }
+  if (prev && prev.phase === 'meet' && meta.phase === 'play' && inRound()) {
+    hideCard();
+    const i = roundPs().indexOf(uid); [me.x, me.y] = spawnAt(i);
+    killReady = now() + 15000;
+    const ej = meta.ej || {};
+    toast(ej.u ? nameOf(ej.u) + ' гарлаа. ' + (ej.imp ? 'Тэр хорлогч байсан!' : 'Тэр хорлогч биш байсан.') : 'Хэн ч гараагүй (санал тэнцсэн эсвэл алгассан).', 4500);
+  }
+  if (meta.phase === 'end' && endSeen !== meta.round) { endSeen = meta.round; closeTask(); endCard(); }
+  if (meta.phase === 'lobby' && ov.hidden) lobby();
+}
+async function loadRoles(round) {
+  // the host wrote every role, so it may read them back (the rules allow the round's host)
+  const rr = {};
+  for (const id of roundPs()) { try { const s = await D.get(P('role/' + round + '/' + id)); if (s.exists()) rr[id] = s.val().r; } catch {} }
+  roleCache[round] = rr;
+}
+async function connect() {
+  const [A, U, Dm] = await Promise.all(['app', 'auth', 'database'].map(m => import(SDK + 'firebase-' + m + '.js')));
+  const app = A.initializeApp(CFG), cred = await U.signInAnonymously(U.getAuth(app));
+  D = Dm; rdb = D.getDatabase(app); uid = cred.user.uid; net = true;
+  D.onValue(D.ref(rdb, '.info/serverTimeOffset'), s => { offset = Number(s.val()) || 0; }, () => {});
+  if (myName) D.set(D.ref(rdb, 'names/' + uid), myName).catch(() => {});
+  if (CODE) for (const b of ['arena/', 'openarena/']) { try { const s = await D.get(D.ref(rdb, b + CODE + '/by')); if (s.exists()) { roomBy = s.val(); break; } } catch {} }
+  D.onDisconnect(P('p/' + uid)).remove().catch(() => {});
+  lastPub = 0; publish(performance.now() + 1e6);
+  const upd = s => { const v = s.val(); if (!v || typeof v !== 'object') return; const old = players.get(s.key); players.set(s.key, { ...v, dx: old && old.dx }); };
+  D.onChildAdded(P('p'), s => { upd(s); if (!ov.hidden && !card.querySelector('.timer') && !openTask && !card.querySelector('.big')) lobby(); });
+  D.onChildChanged(P('p'), upd);
+  D.onChildRemoved(P('p'), s => { players.delete(s.key); });
+  D.onValue(P('meta'), s => onMeta(s.val()), () => {});
+  lobby();
+}
+requestAnimationFrame(frame);
+lobby();
+if (CFG) connect().catch(() => toast('Сервертэй холбогдож чадсангүй.'));
+</script>
+</body>
+</html>

@@ -329,9 +329,14 @@ async function saveBest(v) {
   if (v > local) { lb.cs2 = v; LS.set('best', lb); }
   if (!D || !uid) return v > local ? 'Шинэ дээд амжилт (энэ төхөөрөмж).' : 'Таны дээд: ' + local;
   try {
-    const cur = (await D.get(R('scores/' + uid + '/cs2/best'))).val() || 0;
-    if (v > cur) { await D.update(R('scores/' + uid), { cs2: { best: v, at: Date.now() } }); return 'Шинэ дээд амжилт! Онооны самбарт хадгалагдлаа.'; }
-    return 'Таны дээд: ' + cur + ' оноо.';
+    // the score node the hub reads: all-time best plus today's and this week's, Ulaanbaatar time
+    const ref = R('scores/' + uid + '/cs2'), o = (await D.get(ref)).val() || {};
+    const t = now(), dk = Math.floor((t + 288e5) / 864e5), wk = Math.floor((dk + 3) / 7);
+    const pick = (cur, same) => (same && cur >= v ? cur : v);
+    const best = Math.max(Number(o.best) || 0, v);
+    const n = { best, at: best !== o.best ? t : o.at || t, db: pick(o.db, o.dk === dk), dk, wb: pick(o.wb, o.wk === wk), wk };
+    if (!['best', 'db', 'dk', 'wb', 'wk'].every(k => n[k] === o[k])) await D.set(ref, n);
+    return best !== o.best ? 'Шинэ дээд амжилт! Онооны самбарт хадгалагдлаа.' : 'Таны дээд: ' + best + ' оноо.';
   } catch { return ''; }
 }
 
